@@ -7,7 +7,6 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 RETRY_ATTEMPTS = 5
 RETRY_BASE_DELAY = 2   # seconds — doubles each attempt
 
-
 class LLMClient:
     """Groq API client using raw HTTP requests (OpenAI-compatible endpoint)."""
 

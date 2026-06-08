@@ -65,6 +65,11 @@ def main():
             ui.info("Goodbye.")
             break
 
+        if user_input.lower() in ("reset", "clear"):
+            agent.reset()
+            ui.info("Conversation history cleared.")
+            continue
+
         try:
             agent.run(user_input)
         except KeyboardInterrupt:

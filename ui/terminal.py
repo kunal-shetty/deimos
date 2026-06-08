@@ -23,7 +23,6 @@ LOGO = f"""{CYAN}{BOLD}
 {RESET}{DIM}  autonomous coding agent{RESET}
 """
 
-
 class Spinner:
     """Simple terminal spinner shown while the LLM is thinking."""
 
