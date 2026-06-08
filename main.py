@@ -26,9 +26,18 @@ def load_system_prompt() -> str:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Deimos — Autonomous Coding Agent")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show tool output previews")
-    return parser.parse_args()
+    parser = argparse.ArgumentParser(description="Deimos — Autonomous Coding Agent", add_help=False)
+    subparsers = parser.add_subparsers(dest="command")
+
+    assemble = subparsers.add_parser("assemble", help="Start the Deimos agent")
+    assemble.add_argument("--verbose", "-v", action="store_true", help="Show tool output previews")
+
+    # Show help if no subcommand given
+    args = parser.parse_args()
+    if args.command is None:
+        parser.print_help()
+        sys.exit(0)
+    return args
 
 
 def main():
