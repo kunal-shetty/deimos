@@ -91,7 +91,20 @@ class TerminalUI:
 
     def agent_response(self, text: str):
         self._stop_spinner()
-        print(f"\n{GREEN}◆{RESET} {text}\n")
+        sys.stdout.write(f"\n{GREEN}◆{RESET} ")
+        sys.stdout.flush()
+        for char in text:
+            sys.stdout.write(char)
+            sys.stdout.flush()
+            # Slight pause after punctuation for a more natural rhythm
+            if char in ".!?":
+                time.sleep(0.06)
+            elif char == ",":
+                time.sleep(0.03)
+            else:
+                time.sleep(0.012)
+        sys.stdout.write("\n\n")
+        sys.stdout.flush()
 
     def error(self, message: str):
         self._stop_spinner()
