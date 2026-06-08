@@ -97,10 +97,10 @@ class TerminalUI:
             sys.stdout.write(char)
             sys.stdout.flush()
             # Slight pause after punctuation for a more natural rhythm
-            if char in ".!?":
-                time.sleep(0.06)
+            if char in ".!?:":
+                time.sleep(0.7)
             elif char == ",":
-                time.sleep(0.03)
+                time.sleep(0.3)
             else:
                 time.sleep(0.012)
         sys.stdout.write("\n\n")
