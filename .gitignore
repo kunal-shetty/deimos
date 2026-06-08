@@ -50,3 +50,4 @@ Desktop.ini
 
 # Project specific
 workspace/output.txt
+*.egg-info/
