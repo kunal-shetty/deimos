@@ -28,6 +28,16 @@ class Agent:
 
         self.ctx = Context(enriched_system)
 
+        # If resuming a past conversation, restore its messages
+        resumed_messages = memory.load_resumed_messages()
+        for msg in resumed_messages:
+            if msg["role"] == "user":
+                self.ctx.add_user(msg["content"])
+            else:
+                self.ctx.add_assistant(msg["content"])
+        if resumed_messages:
+            ui.conversation_resumed(len(resumed_messages))
+
     def run(self, user_input: str):
         self.ctx.add_user(user_input)
         self.memory.save_message("user", user_input)
@@ -66,9 +76,10 @@ class Agent:
         self.ui.error(f"Reached max iterations ({MAX_ITERATIONS}). Stopping.")
 
     def shutdown(self):
-        """Called on exit — generates episodic summary + extracts semantic facts."""
+        """Called on exit — generates episodic summary + title + extracts facts."""
         self.ui.saving_memory()
-        self.memory.end_session(self.ctx.messages)
+        title = self.memory.end_session(self.ctx.messages)
+        return title
 
     def reset(self):
         """Clear in-memory context (does not delete persisted memory)."""
