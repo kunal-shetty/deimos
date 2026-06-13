@@ -23,6 +23,7 @@ LOGO = f"""{CYAN}{BOLD}
 {RESET}{DIM}  autonomous coding agent{RESET}
 """
 
+
 class Spinner:
     """Simple terminal spinner shown while the LLM is thinking."""
 
@@ -96,10 +97,10 @@ class TerminalUI:
             sys.stdout.write(char)
             sys.stdout.flush()
             # Slight pause after punctuation for a more natural rhythm
-            if char in ".!?:":
-                time.sleep(0.7)
+            if char in ".!?":
+                time.sleep(0.06)
             elif char == ",":
-                time.sleep(0.3)
+                time.sleep(0.03)
             else:
                 time.sleep(0.012)
         sys.stdout.write("\n\n")
@@ -112,3 +113,14 @@ class TerminalUI:
     def info(self, message: str):
         self._stop_spinner()
         print(f"{DIM}{message}{RESET}")
+
+    def memory_loaded(self):
+        print(f"{DIM}  ✓ Loaded memory from previous sessions{RESET}\n")
+
+    def saving_memory(self):
+        sys.stdout.write(f"{DIM}  Saving memory...{RESET}")
+        sys.stdout.flush()
+
+    def memory_saved(self):
+        sys.stdout.write(f"\r{DIM}  ✓ Memory saved.{RESET}\n")
+        sys.stdout.flush()
