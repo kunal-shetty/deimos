@@ -16,3 +16,8 @@ LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 
 # Agent
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "30"))
+
+# Supabase / Memory
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+DEIMOS_USER_ID = os.getenv("DEIMOS_USER_ID")  # uuid of the row in `users` table
