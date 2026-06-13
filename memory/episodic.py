@@ -33,6 +33,15 @@ ARCHIVE_COMPRESSION_PROMPT = (
     "Output only the summary, no preamble or headers."
 )
 
+TITLE_PROMPT = (
+    "Generate a short, catchy title (3-6 words) for this conversation between "
+    "a user and an AI coding agent, based on the transcript below. "
+    "The title should capture the main topic or task (e.g. "
+    "'Binary Search in Python', 'HRBot Branches Module', 'Deimos Memory System'). "
+    "Do not use quotes, punctuation at the end, or generic titles like 'Conversation'. "
+    "Respond with ONLY the title text, nothing else."
+)
+
 
 class EpisodicMemory:
     """Manages episodic summaries and their compression into archives."""
@@ -60,6 +69,18 @@ class EpisodicMemory:
         }).execute()
 
         self._maybe_compress()
+
+    def generate_title(self, messages: list[dict]) -> str | None:
+        """Generate a short, descriptive title for a conversation."""
+        transcript = _messages_to_transcript(messages)
+        if not transcript.strip():
+            return None
+        title = _call_llm(TITLE_PROMPT, transcript[:2000], max_tokens=30)
+        if not title:
+            return None
+        # Clean up: strip quotes/whitespace, cap length
+        title = title.strip().strip('"\'').strip()
+        return title[:80] if title else None
 
     def get_recent_summaries(self, limit: int = 3) -> list[str]:
         """Get the most recent episodic summaries (level-0)."""
