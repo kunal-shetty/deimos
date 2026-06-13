@@ -117,10 +117,35 @@ class TerminalUI:
     def memory_loaded(self):
         print(f"{DIM}  ✓ Loaded memory from previous sessions{RESET}\n")
 
+    def conversation_resumed(self, message_count: int):
+        print(f"{DIM}  ✓ Resumed conversation ({message_count} messages){RESET}\n")
+
     def saving_memory(self):
         sys.stdout.write(f"{DIM}  Saving memory...{RESET}")
         sys.stdout.flush()
 
-    def memory_saved(self):
-        sys.stdout.write(f"\r{DIM}  ✓ Memory saved.{RESET}\n")
-        sys.stdout.flush()
+    def memory_saved(self, title: str | None = None):
+        sys.stdout.write("\r\033[K")
+        if title:
+            print(f"{DIM}  ✓ Memory saved.{RESET} {CYAN}\"{title}\"{RESET}")
+        else:
+            print(f"{DIM}  ✓ Memory saved.{RESET}")
+
+    def print_conversations(self, conversations: list[dict]):
+        """Render a list of past conversations."""
+        if not conversations:
+            print(f"{DIM}No past conversations found.{RESET}\n")
+            return
+
+        print(f"\n{BOLD}Past conversations:{RESET}\n")
+        for i, conv in enumerate(conversations, 1):
+            title = conv.get("title") or "(untitled)"
+            started = conv.get("started_at", "")[:16].replace("T", " ")
+            count = conv.get("message_count", 0)
+            full_id = conv["id"]
+
+            print(
+                f"  {CYAN}{i:>2}.{RESET} {BOLD}{title}{RESET}\n"
+                f"      {DIM}{started}  ·  {count} messages  ·  id: {full_id}{RESET}"
+            )
+        print()
