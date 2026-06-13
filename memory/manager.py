@@ -1,22 +1,25 @@
 """
-MemoryManager — orchestrates working/episodic/semantic memory.
+MemoryManager — orchestrates working/episodic/semantic/active memory.
 
 Lifecycle:
   startup  → load semantic facts + recent episodic summaries → build system prompt
-  per turn → save messages to conversations/messages tables
-  on exit  → summarize this conversation (episodic) + extract facts (semantic)
+             (optionally resume a past conversation's messages)
+  per turn → save messages to conversations/messages tables, score importance
+  on exit  → summarize this conversation (episodic) + generate title +
+             extract facts (semantic)
 """
 
 from memory.supabase_client import get_client
 from memory.conversation import ConversationStore
 from memory.episodic import EpisodicMemory
 from memory.semantic import SemanticMemory
+from memory.active import score_message
 
 
 class MemoryManager:
     """Top-level memory coordinator for a single user session."""
 
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str, resume_id: str | None = None):
         self.user_id = user_id
         self.client = get_client()
 
@@ -24,7 +27,12 @@ class MemoryManager:
         self.episodic = EpisodicMemory(user_id)
         self.semantic = SemanticMemory(user_id)
 
-        self.conversations.start_conversation()
+        self.resumed = False
+        if resume_id:
+            self.conversations.resume_conversation(resume_id)
+            self.resumed = True
+        else:
+            self.conversations.start_conversation()
 
     # ── Startup: build enriched system prompt ──────────────────────────────────
 
@@ -62,17 +70,60 @@ class MemoryManager:
             + "\n\n".join(sections)
         )
 
+    def load_resumed_messages(self) -> list[dict]:
+        """
+        If resuming a past conversation, return its stored messages
+        converted back into the format Context expects.
+        """
+        if not self.resumed:
+            return []
+
+        rows = self.conversations.get_messages()
+        restored = []
+        for row in rows:
+            role = row["role"]
+            content = row["content"]
+
+            if role == "tool":
+                # Stored as {"tool_call_id":..., "name":..., "content":...}
+                restored.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": content.get("tool_call_id"),
+                        "content": content.get("content"),
+                    }],
+                })
+            elif role == "assistant":
+                # content is the raw OAI message dict
+                restored.append({"role": "assistant", "content": content})
+            else:
+                restored.append({"role": "user", "content": content})
+
+        return restored
+
     # ── Per-turn persistence ─────────────────────────────────────────────────
 
     def save_message(self, role: str, content):
-        self.conversations.save_message(role, content)
+        importance, summary = 0, None
 
-    # ── Shutdown: summarize + extract facts ──────────────────────────────────
+        # Active memory: score user messages only (keeps it cheap)
+        if role == "user" and isinstance(content, str):
+            importance, summary = score_message(content)
+
+        self.conversations.save_message(role, content, importance=importance, summary=summary)
+
+    # ── Conversation listing ────────────────────────────────────────────────
+
+    def list_conversations(self, limit: int = 20) -> list[dict]:
+        return self.conversations.list_conversations(limit=limit)
+
+    # ── Shutdown: summarize + title + extract facts ──────────────────────────
 
     def end_session(self, ctx_messages: list[dict]):
         """
-        Called on exit. Generates an episodic summary of this conversation
-        and extracts/updates semantic facts.
+        Called on exit. Generates an episodic summary + title for this
+        conversation and extracts/updates semantic facts.
         Safe to call even if the conversation was empty or very short.
         """
         if not ctx_messages:
@@ -81,6 +132,12 @@ class MemoryManager:
 
         conversation_id = self.conversations.conversation_id
 
+        title = self.episodic.generate_title(ctx_messages)
+        if title:
+            self.conversations.set_title(title)
+
         self.episodic.summarize_conversation(conversation_id, ctx_messages)
         self.semantic.extract_and_store(ctx_messages)
         self.conversations.end_conversation()
+
+        return title
