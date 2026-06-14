@@ -116,6 +116,28 @@ class ConversationStore:
 
         return conversations
 
+    def get_conversation(self, conversation_id: str) -> dict | None:
+        """Fetch a single conversation's metadata."""
+        result = (
+            self.client.table("conversations")
+            .select("id, title, started_at, ended_at")
+            .eq("id", conversation_id)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Delete a conversation and its messages (cascade)."""
+        result = (
+            self.client.table("conversations")
+            .delete()
+            .eq("id", conversation_id)
+            .eq("user_id", self.user_id)
+            .execute()
+        )
+        return bool(result.data)
+
 
 def _to_jsonable(obj):
     """Best-effort conversion of arbitrary objects to JSON-safe structures."""
