@@ -118,6 +118,25 @@ class MemoryManager:
     def list_conversations(self, limit: int = 20) -> list[dict]:
         return self.conversations.list_conversations(limit=limit)
 
+    def delete_conversation(self, conversation_id: str) -> bool:
+        return self.conversations.delete_conversation(conversation_id)
+
+    @property
+    def conversation_id(self) -> str | None:
+        return self.conversations.conversation_id
+
+    def current_title(self) -> str | None:
+        if not self.conversation_id:
+            return None
+        conv = self.conversations.get_conversation(self.conversation_id)
+        return conv.get("title") if conv else None
+
+    def set_title(self, title: str):
+        self.conversations.set_title(title)
+
+    def get_facts(self) -> list[dict]:
+        return self.semantic.get_all_facts()
+
     # ── Shutdown: summarize + title + extract facts ──────────────────────────
 
     def end_session(self, ctx_messages: list[dict]):
