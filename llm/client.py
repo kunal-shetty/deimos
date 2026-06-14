@@ -7,6 +7,7 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 RETRY_ATTEMPTS = 5
 RETRY_BASE_DELAY = 2   # seconds — doubles each attempt
 
+
 class LLMClient:
     """Groq API client using raw HTTP requests (OpenAI-compatible endpoint)."""
 
@@ -17,6 +18,11 @@ class LLMClient:
             "Authorization": f"Bearer {LLM_API_KEY}",
             "Content-Type": "application/json",
         }
+        self.model = LLM_MODEL
+
+    def set_model(self, model_name: str):
+        """Switch the model used for subsequent completions."""
+        self.model = model_name
 
     def complete(self, system: str, messages: list[dict], tools: list[dict]) -> dict:
         """
@@ -33,7 +39,7 @@ class LLMClient:
         oai_messages = [{"role": "system", "content": system}] + _convert_messages(messages)
 
         payload = {
-            "model": LLM_MODEL,
+            "model": self.model,
             "max_tokens": 4096,
             "messages": oai_messages,
             "tools": oai_tools,
