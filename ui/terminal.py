@@ -1,8 +1,24 @@
 import sys
+import os
 import json
+import shutil
 import threading
 import itertools
 import time
+import re
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.styles import Style as PTStyle
+from prompt_toolkit.formatted_text import HTML
+
+from pygments import highlight
+from pygments.lexers import get_lexer_by_name, guess_lexer
+from pygments.formatters import Terminal256Formatter
+from pygments.util import ClassNotFound
+
+from config import INPUT_HISTORY_FILE, LOCAL_DIR
 
 
 CYAN = "\033[96m"
@@ -22,6 +38,41 @@ LOGO = f"""{CYAN}{BOLD}
   ╚═════╝ ╚══════╝╚═╝╚═╝     ╚═╝ ╚═════╝ ╚══════╝
 {RESET}{DIM}  autonomous coding agent{RESET}
 """
+
+CODE_BLOCK_RE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
+
+PT_STYLE = PTStyle.from_dict({
+    "prompt": "fg:#00d7ff bold",
+    "completion-menu.completion": "bg:#1c1c1c fg:#cccccc",
+    "completion-menu.completion.current": "bg:#444444 fg:#ffffff bold",
+    "completion-menu.meta.completion": "bg:#1c1c1c fg:#888888",
+    "completion-menu.meta.completion.current": "bg:#444444 fg:#dddddd",
+    "scrollbar.background": "bg:#1c1c1c",
+    "scrollbar.button": "bg:#444444",
+})
+
+
+class SlashCommandCompleter(Completer):
+    """Live dropdown completer for '/' commands."""
+
+    def __init__(self, commands: list[tuple[str, str]]):
+        # commands: list of (name, description)
+        self.commands = commands
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+
+        word = text[1:]
+        for name, description in self.commands:
+            if name.startswith(word):
+                yield Completion(
+                    name,
+                    start_position=-len(word),
+                    display=f"/{name}",
+                    display_meta=description,
+                )
 
 
 class Spinner:
@@ -57,16 +108,33 @@ class TerminalUI:
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
         self._spinner: Spinner | None = None
+        self._session: PromptSession | None = None
+
+    # ── Setup ────────────────────────────────────────────────────────────────
+
+    def setup_input(self, commands: list[tuple[str, str]]):
+        """Initialize the prompt_toolkit session with a '/' command completer."""
+        LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+        self._session = PromptSession(
+            completer=SlashCommandCompleter(commands),
+            complete_while_typing=True,
+            history=FileHistory(str(INPUT_HISTORY_FILE)),
+            style=PT_STYLE,
+        )
 
     def print_logo(self):
         print(LOGO)
-        print(f"{DIM}  Type your task, or 'exit' to quit.{RESET}\n")
+        print(f"{DIM}  Type your task, or / for commands.{RESET}\n")
 
     def prompt(self) -> str:
         try:
-            return input(f"{CYAN}{BOLD}>{RESET} ").strip()
+            if self._session:
+                return self._session.prompt(HTML("<prompt>›</prompt> ")).strip()
+            return input("> ").strip()
         except (EOFError, KeyboardInterrupt):
-            return "exit"
+            return "/exit"
+
+    # ── Spinner ──────────────────────────────────────────────────────────────
 
     def thinking(self):
         self._spinner = Spinner("Thinking")
@@ -77,34 +145,69 @@ class TerminalUI:
             self._spinner.stop()
             self._spinner = None
 
+    # ── Tool rendering ───────────────────────────────────────────────────────
+
     def tool_call(self, name: str, inputs: dict):
         self._stop_spinner()
         args_str = ", ".join(
-            f"{k}={json.dumps(v)[:60]!r}" for k, v in inputs.items()
+            f"{k}={_truncate(json.dumps(v), 60)}" for k, v in inputs.items()
         )
-        print(f"  {YELLOW}⚙{RESET}  {BOLD}{name}{RESET}{DIM}({args_str}){RESET}")
+        print(f"{CYAN}●{RESET} {BOLD}{name}{RESET}{DIM}({args_str}){RESET}")
 
     def tool_result(self, result: str):
-        if self.verbose:
-            preview = result[:200] + ("…" if len(result) > 200 else "")
-            print(f"  {DIM}   → {preview}{RESET}")
+        lines = result.strip().splitlines() or [""]
+        first = _truncate(lines[0], 100)
+        print(f"  {DIM}⎿  {first}{RESET}")
+
+        if self.verbose and len(lines) > 1:
+            for line in lines[1:6]:
+                print(f"     {DIM}{_truncate(line, 100)}{RESET}")
+            if len(lines) > 6:
+                print(f"     {DIM}… ({len(lines) - 6} more lines){RESET}")
+
+    # ── Agent response (typewriter prose + highlighted code blocks) ───────────
 
     def agent_response(self, text: str):
         self._stop_spinner()
         sys.stdout.write(f"\n{GREEN}◆{RESET} ")
         sys.stdout.flush()
+
+        pos = 0
+        for match in CODE_BLOCK_RE.finditer(text):
+            self._typewriter(text[pos:match.start()])
+            lang = match.group(1)
+            code = match.group(2)
+            self._print_code_block(code, lang)
+            pos = match.end()
+
+        self._typewriter(text[pos:])
+        sys.stdout.write("\n\n")
+        sys.stdout.flush()
+
+    def _typewriter(self, text: str):
         for char in text:
             sys.stdout.write(char)
             sys.stdout.flush()
-            # Slight pause after punctuation for a more natural rhythm
             if char in ".!?":
                 time.sleep(0.06)
             elif char == ",":
                 time.sleep(0.03)
             else:
                 time.sleep(0.012)
-        sys.stdout.write("\n\n")
+
+    def _print_code_block(self, code: str, lang: str):
+        code = code.rstrip("\n")
+        highlighted = _highlight_code(code, lang)
+
+        sys.stdout.write("\n")
+        label = lang or "code"
+        sys.stdout.write(f"{DIM}╭─ {label}{RESET}\n")
+        for line in highlighted.split("\n"):
+            sys.stdout.write(f"{DIM}│{RESET} {line}\n")
+        sys.stdout.write(f"{DIM}╰─{RESET}\n")
         sys.stdout.flush()
+
+    # ── Status / info messages ──────────────────────────────────────────────
 
     def error(self, message: str):
         self._stop_spinner()
@@ -131,6 +234,11 @@ class TerminalUI:
         else:
             print(f"{DIM}  ✓ Memory saved.{RESET}")
 
+    def clear_screen(self):
+        os.system("cls" if os.name == "nt" else "clear")
+
+    # ── Structured displays ──────────────────────────────────────────────────
+
     def print_conversations(self, conversations: list[dict]):
         """Render a list of past conversations."""
         if not conversations:
@@ -149,3 +257,64 @@ class TerminalUI:
                 f"      {DIM}{started}  ·  {count} messages  ·  id: {full_id}{RESET}"
             )
         print()
+
+    def print_help(self, commands):
+        """Render the list of all available slash commands."""
+        print(f"\n{BOLD}Available commands:{RESET}\n")
+        width = max(len(c.usage) for c in commands) + 2
+        for c in commands:
+            print(f"  {CYAN}{c.usage:<{width}}{RESET} {DIM}{c.description}{RESET}")
+        print()
+
+    def print_facts(self, facts: list[dict]):
+        """Render semantic memory facts about the user."""
+        if not facts:
+            print(f"{DIM}No facts stored yet.{RESET}\n")
+            return
+
+        print(f"\n{BOLD}What Deimos remembers about you:{RESET}\n")
+        key_width = max(len(f["key"]) for f in facts) + 2
+        for f in facts:
+            confidence = f.get("confidence", 0)
+            freq = f.get("frequency", 1)
+            print(
+                f"  {CYAN}{f['key']:<{key_width}}{RESET} {f['value']}"
+                f"  {DIM}(confidence {confidence}, seen {freq}x){RESET}"
+            )
+        print()
+
+    def print_status(self, info: dict):
+        """Render a key/value status panel."""
+        print(f"\n{DIM}╭─ status{RESET}")
+        key_width = max(len(k) for k in info.keys()) + 2
+        for key, value in info.items():
+            print(f"{DIM}│{RESET} {BOLD}{key:<{key_width}}{RESET} {value}")
+        print(f"{DIM}╰─{RESET}\n")
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _truncate(text: str, limit: int) -> str:
+    text = text.replace("\n", " ")
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _highlight_code(code: str, lang: str) -> str:
+    """Return ANSI-highlighted code using pygments, falling back gracefully."""
+    try:
+        if lang:
+            lexer = get_lexer_by_name(lang, stripall=True)
+        else:
+            lexer = guess_lexer(code)
+    except ClassNotFound:
+        try:
+            lexer = get_lexer_by_name("text")
+        except Exception:
+            return code
+
+    try:
+        formatter = Terminal256Formatter(style="monokai")
+        result = highlight(code, lexer, formatter)
+        return result.rstrip("\n")
+    except Exception:
+        return code
