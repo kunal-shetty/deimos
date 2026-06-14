@@ -21,3 +21,7 @@ MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "30"))
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 DEIMOS_USER_ID = os.getenv("DEIMOS_USER_ID")  # uuid of the row in `users` table
+
+# Local files (input history, etc — not synced to Supabase)
+LOCAL_DIR = Path.home() / ".deimos"
+INPUT_HISTORY_FILE = LOCAL_DIR / "input_history"
