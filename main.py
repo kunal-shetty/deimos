@@ -4,11 +4,8 @@ Deimos — Autonomous Coding Agent
 Usage:
   deimos assemble [--verbose]
 
-In-session slash commands:
-  /chats          List past conversations
-  /resume <id>    Resume a past conversation (full id from /chats)
-  /reset          Clear current context (memory preserved)
-  /exit           Quit
+Type / in the prompt to see all available in-session commands
+(/help, /chats, /resume, /reset, /memory, /status, /model, ...).
 """
 
 import sys
@@ -24,7 +21,7 @@ from llm.client import LLMClient
 from tools.registry import ToolRegistry
 from ui.terminal import TerminalUI
 from memory.manager import MemoryManager
-from memory.conversation import ConversationStore
+from commands import build_registry, AppState
 
 
 def load_system_prompt() -> str:
@@ -48,8 +45,7 @@ def parse_args():
     return args
 
 
-def build_agent(ui: TerminalUI, llm: LLMClient, tools: ToolRegistry,
-                 system_prompt: str, resume_id: str | None = None) -> Agent:
+def build_agent(ui, llm, tools, system_prompt, resume_id=None) -> Agent:
     memory = MemoryManager(user_id=DEIMOS_USER_ID, resume_id=resume_id)
     return Agent(ui=ui, llm=llm, tools=tools, system_prompt=system_prompt, memory=memory)
 
@@ -67,6 +63,8 @@ def main():
         )
         sys.exit(1)
 
+    registry = build_registry()
+
     try:
         llm = LLMClient()
         tools = ToolRegistry()
@@ -76,78 +74,37 @@ def main():
         ui.error(f"Failed to initialize Deimos: {e}")
         sys.exit(1)
 
-    shutdown_done = False
+    # Set up '/' command autocomplete with live dropdown
+    command_list = [(c.name, c.description) for c in registry.all()]
+    ui.setup_input(command_list)
 
-    def do_shutdown(current_agent):
-        nonlocal shutdown_done
-        title = current_agent.shutdown()
-        ui.memory_saved(title)
-        shutdown_done = True
+    state = AppState(ui=ui, llm=llm, tools=tools, system_prompt=system_prompt, agent=agent)
 
     try:
-        while True:
+        while state.running:
             user_input = ui.prompt()
 
             if not user_input:
                 continue
 
+            # Backwards-compatible plain-word aliases
             lowered = user_input.lower().strip()
+            if lowered in ("exit", "quit", "q"):
+                user_input = "/exit"
+            elif lowered in ("reset", "clear"):
+                user_input = "/reset"
 
-            # ── Exit ─────────────────────────────────────────────────────────
-            if lowered in ("exit", "quit", "q", "/exit", "/quit"):
-                ui.info("Goodbye.")
-                break
-
-            # ── /reset ───────────────────────────────────────────────────────
-            if lowered in ("reset", "clear", "/reset", "/clear"):
-                agent.reset()
-                ui.info("Conversation history cleared (memory preserved).")
+            if registry.dispatch(user_input, state):
                 continue
 
-            # ── /chats ───────────────────────────────────────────────────────
-            if lowered == "/chats":
-                try:
-                    store = ConversationStore(user_id=DEIMOS_USER_ID)
-                    conversations = store.list_conversations(limit=20)
-                    ui.print_conversations(conversations)
-                except Exception as e:
-                    ui.error(f"Failed to load conversations: {e}")
-                continue
-
-            # ── /resume <id> ─────────────────────────────────────────────────
-            if lowered.startswith("/resume"):
-                parts = user_input.split(maxsplit=1)
-                if len(parts) != 2:
-                    ui.error("Usage: /resume <conversation_id>  (run /chats to see ids)")
-                    continue
-                target_id = parts[1].strip()
-
-                # End/save current session before switching
-                try:
-                    do_shutdown(agent)
-                except Exception as e:
-                    ui.error(f"Failed to save current memory: {e}")
-
-                try:
-                    agent = build_agent(ui, llm, tools, system_prompt, resume_id=target_id)
-                    shutdown_done = False
-                except Exception as e:
-                    ui.error(f"Failed to resume conversation: {e}")
-                continue
-
-            # ── Normal agent turn ────────────────────────────────────────────
             try:
-                agent.run(user_input)
+                state.agent.run(user_input)
             except KeyboardInterrupt:
                 ui.info("\nInterrupted.")
             except Exception as e:
                 ui.error(f"Unexpected error: {e}")
     finally:
-        if not shutdown_done:
-            try:
-                do_shutdown(agent)
-            except Exception as e:
-                ui.error(f"Failed to save memory: {e}")
+        state.shutdown_current_agent()
 
 
 if __name__ == "__main__":
