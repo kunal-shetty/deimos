@@ -1,18 +1,12 @@
 """
-MemoryManager — orchestrates working/episodic/semantic/active memory.
-
-Lifecycle:
-  startup  → load semantic facts + recent episodic summaries → build system prompt
-             (optionally resume a past conversation's messages)
-  per turn → save messages to conversations/messages tables, score importance
-  on exit  → summarize this conversation (episodic) + generate title +
-             extract facts (semantic)
+MemoryManager — orchestrates working/episodic/semantic/active/project memory.
 """
 
 from memory.supabase_client import get_client
 from memory.conversation import ConversationStore
 from memory.episodic import EpisodicMemory
 from memory.semantic import SemanticMemory
+from memory.project import ProjectMemory
 from memory.active import score_message
 
 
@@ -22,10 +16,12 @@ class MemoryManager:
     def __init__(self, user_id: str, resume_id: str | None = None):
         self.user_id = user_id
         self.client = get_client()
+        self._active_project: str | None = None
 
         self.conversations = ConversationStore(user_id)
         self.episodic = EpisodicMemory(user_id)
         self.semantic = SemanticMemory(user_id)
+        self.project = ProjectMemory(user_id)
 
         self.resumed = False
         if resume_id:
@@ -37,16 +33,15 @@ class MemoryManager:
     # ── Startup: build enriched system prompt ──────────────────────────────────
 
     def build_memory_context(self) -> str | None:
-        """
-        Returns a block of text to append to the system prompt, containing
-        semantic facts + recent episodic summaries + archive overview.
-        Returns None if there's no memory yet (first ever run).
-        """
         sections = []
 
         facts_block = self.semantic.as_prompt_block()
         if facts_block:
             sections.append(f"### What you know about the user\n{facts_block}")
+
+        known_projects = self.project.get_known_projects()
+        if known_projects:
+            sections.append(f"### Known projects\n" + "\n".join(f"- {p}" for p in known_projects))
 
         recent_summaries = self.episodic.get_recent_summaries(limit=3)
         if recent_summaries:
@@ -55,9 +50,14 @@ class MemoryManager:
             )
             sections.append(f"### Recent conversation history\n{joined}")
 
-        archive = self.episodic.get_latest_archive(level=1)
-        if archive:
-            sections.append(f"### Longer-term context\n{archive}")
+        # Level-2 first (broadest), then level-1 (more specific)
+        archive_l2 = self.episodic.get_latest_archive(level=2)
+        if archive_l2:
+            sections.append(f"### Long-term context (consolidated)\n{archive_l2}")
+        else:
+            archive_l1 = self.episodic.get_latest_archive(level=1)
+            if archive_l1:
+                sections.append(f"### Longer-term context\n{archive_l1}")
 
         if not sections:
             return None
@@ -70,22 +70,37 @@ class MemoryManager:
             + "\n\n".join(sections)
         )
 
+    def detect_and_inject_project(self, user_input: str, ctx):
+        """
+        Detect if the user's message relates to a known project.
+        If a new project is detected (or project changed), inject its facts
+        into the context as a system-level message.
+        Only runs once per unique project detection to avoid repeat injections.
+        """
+        detected = self.project.detect_project(user_input)
+        if detected and detected != self._active_project:
+            self._active_project = detected
+            block = self.project.as_prompt_block(detected)
+            if block:
+                # Inject as a user→assistant pair so it's visible in the message history
+                ctx.add_user(
+                    f"[System: The following facts about the current project "
+                    f"have been loaded from memory]\n{block}"
+                )
+                ctx.add_assistant(
+                    f"Understood — I've loaded the context for {detected}. "
+                    "I'll take it into account as we work."
+                )
+
     def load_resumed_messages(self) -> list[dict]:
-        """
-        If resuming a past conversation, return its stored messages
-        converted back into the format Context expects.
-        """
         if not self.resumed:
             return []
-
         rows = self.conversations.get_messages()
         restored = []
         for row in rows:
             role = row["role"]
             content = row["content"]
-
             if role == "tool":
-                # Stored as {"tool_call_id":..., "name":..., "content":...}
                 restored.append({
                     "role": "user",
                     "content": [{
@@ -95,25 +110,20 @@ class MemoryManager:
                     }],
                 })
             elif role == "assistant":
-                # content is the raw OAI message dict
                 restored.append({"role": "assistant", "content": content})
             else:
                 restored.append({"role": "user", "content": content})
-
         return restored
 
     # ── Per-turn persistence ─────────────────────────────────────────────────
 
     def save_message(self, role: str, content):
         importance, summary = 0, None
-
-        # Active memory: score user messages only (keeps it cheap)
         if role == "user" and isinstance(content, str):
             importance, summary = score_message(content)
-
         self.conversations.save_message(role, content, importance=importance, summary=summary)
 
-    # ── Conversation listing ────────────────────────────────────────────────
+    # ── Conversation helpers ─────────────────────────────────────────────────
 
     def list_conversations(self, limit: int = 20) -> list[dict]:
         return self.conversations.list_conversations(limit=limit)
@@ -137,17 +147,21 @@ class MemoryManager:
     def get_facts(self) -> list[dict]:
         return self.semantic.get_all_facts()
 
-    # ── Shutdown: summarize + title + extract facts ──────────────────────────
+    def get_project_facts(self, project_name: str | None = None) -> list[dict]:
+        name = project_name or self._active_project
+        if not name:
+            return []
+        return self.project.get_project_facts(name)
+
+    def get_known_projects(self) -> list[str]:
+        return self.project.get_known_projects()
+
+    # ── Shutdown ─────────────────────────────────────────────────────────────
 
     def end_session(self, ctx_messages: list[dict]):
-        """
-        Called on exit. Generates an episodic summary + title for this
-        conversation and extracts/updates semantic facts.
-        Safe to call even if the conversation was empty or very short.
-        """
         if not ctx_messages:
             self.conversations.end_conversation()
-            return
+            return None
 
         conversation_id = self.conversations.conversation_id
 
@@ -157,6 +171,7 @@ class MemoryManager:
 
         self.episodic.summarize_conversation(conversation_id, ctx_messages)
         self.semantic.extract_and_store(ctx_messages)
+        self.project.extract_and_store(ctx_messages)
         self.conversations.end_conversation()
 
         return title
