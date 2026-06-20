@@ -9,6 +9,7 @@ Type / in the prompt to see all available in-session commands
 """
 
 import sys
+import os
 import argparse
 from pathlib import Path
 
@@ -26,9 +27,9 @@ from commands import build_registry, AppState
 
 def load_system_prompt() -> str:
     path = PROMPTS_DIR / "system.txt"
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return "You are Deimos, an autonomous coding agent."
+    base = path.read_text(encoding="utf-8") if path.exists() else "You are Deimos, an autonomous coding agent."
+    cwd = os.getcwd()
+    return base + f"\n\n## Current working directory\n{cwd}\nAll relative file paths refer to this directory."
 
 
 def parse_args():
@@ -55,6 +56,7 @@ def main():
 
     ui = TerminalUI(verbose=getattr(args, "verbose", False))
     ui.print_logo()
+    ui.print_workdir(os.getcwd())
 
     if not DEIMOS_USER_ID:
         ui.error(
