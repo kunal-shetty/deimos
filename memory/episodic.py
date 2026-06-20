@@ -13,6 +13,9 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 # After this many episodic memories accumulate (uncompressed), compress them
 ARCHIVE_BATCH_SIZE = 10
 
+# After this many level-1 archives accumulate, compress them into a level-2
+ARCHIVE_L2_BATCH_SIZE = 5
+
 EPISODIC_SUMMARY_PROMPT = (
     "You are a memory summarizer for an AI coding agent called Deimos. "
     "Given the full transcript of a conversation between a user and Deimos, "
@@ -110,33 +113,55 @@ class EpisodicMemory:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _maybe_compress(self):
-        """If enough uncompressed episodic memories exist, compress them."""
-        # Get all episodic memory ids already used in archives
+        """Compress episodic memories into level-1, then level-1 into level-2."""
+        self._maybe_compress_level(
+            source_table="episodic_memories",
+            source_level=None,
+            target_level=1,
+            batch_size=ARCHIVE_BATCH_SIZE,
+        )
+        self._maybe_compress_level(
+            source_table="archive_memories",
+            source_level=1,
+            target_level=2,
+            batch_size=ARCHIVE_L2_BATCH_SIZE,
+        )
+
+    def _maybe_compress_level(self, source_table: str, source_level: int | None,
+                               target_level: int, batch_size: int):
+        """
+        Generic compression step: if `batch_size` unconsumed rows exist in
+        `source_table` (filtered by `source_level` if given), summarize them
+        into a new row in archive_memories at `target_level`.
+        """
+        # Collect ids already consumed by archives at target_level
         used_ids = set()
-        archives = (
+        consumed = (
             self.client.table("archive_memories")
             .select("source_ids")
             .eq("user_id", self.user_id)
-            .eq("level", 1)
+            .eq("level", target_level)
             .execute()
         )
-        for row in archives.data:
+        for row in consumed.data:
             used_ids.update(row["source_ids"])
 
-        # Get all episodic memories not yet archived
-        all_episodic = (
-            self.client.table("episodic_memories")
+        # Fetch candidate source rows
+        query = (
+            self.client.table(source_table)
             .select("id, summary, created_at")
             .eq("user_id", self.user_id)
-            .order("created_at")
-            .execute()
         )
-        unarchived = [row for row in all_episodic.data if row["id"] not in used_ids]
+        if source_level is not None:
+            query = query.eq("level", source_level)
+        all_rows = query.order("created_at").execute()
 
-        if len(unarchived) < ARCHIVE_BATCH_SIZE:
+        unconsumed = [row for row in all_rows.data if row["id"] not in used_ids]
+
+        if len(unconsumed) < batch_size:
             return
 
-        batch = unarchived[:ARCHIVE_BATCH_SIZE]
+        batch = unconsumed[:batch_size]
         combined_text = "\n\n---\n\n".join(row["summary"] for row in batch)
 
         compressed = _call_llm(ARCHIVE_COMPRESSION_PROMPT, combined_text, max_tokens=700)
@@ -145,10 +170,19 @@ class EpisodicMemory:
 
         self.client.table("archive_memories").insert({
             "user_id": self.user_id,
-            "level": 1,
+            "level": target_level,
             "summary": compressed,
             "source_ids": [row["id"] for row in batch],
         }).execute()
+
+        # Recurse in case this pushes the next level over its threshold too
+        if target_level == 1:
+            self._maybe_compress_level(
+                source_table="archive_memories",
+                source_level=1,
+                target_level=2,
+                batch_size=ARCHIVE_L2_BATCH_SIZE,
+            )
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
