@@ -3,6 +3,12 @@ from .base import BaseTool
 from .read_file import ReadFileTool
 from .write_file import WriteFileTool
 from .run_command import RunCommandTool
+from .list_directory import ListDirectoryTool
+from .search_codebase import SearchCodebaseTool
+from .edit_file import EditFileTool
+from .list_skills import ListSkillsTool
+from .read_skill import ReadSkillTool
+from .create_docx import CreateDocxTool
 
 
 class ToolRegistry:
@@ -13,7 +19,17 @@ class ToolRegistry:
         self._register_defaults()
 
     def _register_defaults(self):
-        for tool in [ReadFileTool(), WriteFileTool(), RunCommandTool()]:
+        for tool in [
+            ReadFileTool(),
+            WriteFileTool(),
+            EditFileTool(),
+            RunCommandTool(),
+            ListDirectoryTool(),
+            SearchCodebaseTool(),
+            ListSkillsTool(),
+            ReadSkillTool(),
+            CreateDocxTool(),
+        ]:
             self.register(tool)
 
     def register(self, tool: BaseTool):
@@ -29,6 +45,7 @@ class ToolRegistry:
         tool = self.get(name)
         if not tool:
             return f"Error: Unknown tool '{name}'"
+        inputs = inputs or {}
         try:
             return tool.run(**inputs)
         except TypeError as e:
