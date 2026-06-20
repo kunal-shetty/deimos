@@ -58,10 +58,16 @@ class LLMClient:
 
         if msg.get("tool_calls"):
             for tc in msg["tool_calls"]:
+                try:
+                    parsed_inputs = json.loads(tc["function"]["arguments"])
+                except (json.JSONDecodeError, TypeError):
+                    parsed_inputs = {}
+                if not isinstance(parsed_inputs, dict):
+                    parsed_inputs = {}
                 tool_calls.append({
                     "id": tc["id"],
                     "name": tc["function"]["name"],
-                    "inputs": json.loads(tc["function"]["arguments"]),
+                    "inputs": parsed_inputs,
                 })
 
         stop_reason = "tool_use" if finish_reason == "tool_calls" else "end_turn"
@@ -73,11 +79,117 @@ class LLMClient:
             "raw_content": msg,
         }
 
-    def _post_with_retry(self, payload: dict) -> requests.Response:
+    def complete_stream(self, system: str, messages: list[dict], tools: list[dict], on_chunk) -> dict:
+        """
+        Send a streaming completion request to Groq.
+        `on_chunk(text)` is called for each text delta as it arrives.
+        Returns the same normalized response dict shape as complete(), built
+        up from the accumulated stream.
+        """
+        oai_tools = [_to_oai_tool(t) for t in tools]
+        oai_messages = [{"role": "system", "content": system}] + _convert_messages(messages)
+
+        payload = {
+            "model": self.model,
+            "max_tokens": 4096,
+            "messages": oai_messages,
+            "tools": oai_tools,
+            "tool_choice": "auto",
+            "stream": True,
+        }
+
+        response = self._post_with_retry(payload, stream=True)
+
+        text_parts = []
+        tool_calls_acc: dict[int, dict] = {}
+        finish_reason = None
+
+        for line in response.iter_lines():
+            if not line:
+                continue
+            line = line.decode("utf-8")
+            if not line.startswith("data: "):
+                continue
+
+            data_str = line[len("data: "):]
+            if data_str.strip() == "[DONE]":
+                break
+
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                continue
+
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+
+            choice = choices[0]
+            delta = choice.get("delta", {})
+
+            if choice.get("finish_reason"):
+                finish_reason = choice["finish_reason"]
+
+            content = delta.get("content")
+            if content:
+                text_parts.append(content)
+                on_chunk(content)
+
+            for tc_delta in delta.get("tool_calls") or []:
+                idx = tc_delta.get("index", 0)
+                if idx not in tool_calls_acc:
+                    tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+
+                if tc_delta.get("id"):
+                    tool_calls_acc[idx]["id"] = tc_delta["id"]
+
+                fn = tc_delta.get("function", {})
+                if fn.get("name"):
+                    tool_calls_acc[idx]["name"] += fn["name"]
+                if fn.get("arguments"):
+                    tool_calls_acc[idx]["arguments"] += fn["arguments"]
+
+        text = "".join(text_parts) or None
+
+        tool_calls = []
+        for idx in sorted(tool_calls_acc.keys()):
+            tc = tool_calls_acc[idx]
+            try:
+                inputs = json.loads(tc["arguments"]) if tc["arguments"] else {}
+            except json.JSONDecodeError:
+                inputs = {}
+            if not isinstance(inputs, dict):
+                inputs = {}
+            tool_calls.append({"id": tc["id"], "name": tc["name"], "inputs": inputs})
+
+        stop_reason = "tool_use" if finish_reason == "tool_calls" else "end_turn"
+
+        raw_content = {"role": "assistant", "content": text}
+        if tool_calls:
+            raw_content["tool_calls"] = [
+                {
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc["name"],
+                        "arguments": json.dumps(tc["inputs"]),
+                    },
+                }
+                for tc in tool_calls
+            ]
+
+        return {
+            "stop_reason": stop_reason,
+            "text": text,
+            "tool_calls": tool_calls,
+            "raw_content": raw_content,
+        }
+
+    def _post_with_retry(self, payload: dict, stream: bool = False) -> requests.Response:
         """POST with exponential backoff on 429 rate limit responses."""
         delay = RETRY_BASE_DELAY
         for attempt in range(1, RETRY_ATTEMPTS + 1):
-            response = requests.post(GROQ_API_URL, headers=self._headers, json=payload)
+            response = requests.post(GROQ_API_URL, headers=self._headers, json=payload, stream=stream)
 
             if response.status_code == 429:
                 # Check if Groq gave us a retry-after header
