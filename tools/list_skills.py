@@ -8,10 +8,10 @@ class ListSkillsTool(BaseTool):
     name = "list_skills"
     description = (
         "List all available skills. Skills contain best-practice instructions "
-        "for producing specific output types (e.g. Word documents). ALWAYS check "
-        "this before attempting a task that matches a skill's domain (document "
-        "creation, presentations, etc.) — call this first, then read_skill on "
-        "anything relevant, before writing any code or calling other tools."
+        "for producing specific output types (Word documents, etc.). ALWAYS "
+        "check this before attempting a task that involves creating a document "
+        "or structured file — call this first, then read_skill on anything "
+        "relevant, before calling the matching creation tool."
     )
     input_schema = {"type": "object", "properties": {}, "required": []}
 
@@ -33,7 +33,6 @@ class ListSkillsTool(BaseTool):
 
 
 def _first_line_summary(path: str) -> str:
-    """Grab the first non-heading, non-empty line as a quick summary."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
@@ -42,4 +41,4 @@ def _first_line_summary(path: str) -> str:
                     return line[:150]
     except Exception:
         pass
-    return "(no summary available)"
+    return "(no summary)"
