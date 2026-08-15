@@ -1,13 +1,7 @@
-"""
-Registry of all slash commands.
-"""
-
 from commands.base import Command
 
 
 class CommandRegistry:
-    """Holds all registered commands and dispatches by name."""
-
     def __init__(self):
         self._commands: dict[str, Command] = {}
 
@@ -24,11 +18,6 @@ class CommandRegistry:
         return sorted(self._commands.keys())
 
     def dispatch(self, raw_input: str, state) -> bool:
-        """
-        If raw_input starts with '/', parse and run the matching command.
-        Returns True if a command was dispatched (handled), False otherwise
-        (caller should treat raw_input as a normal agent prompt).
-        """
         if not raw_input.startswith("/"):
             return False
 
@@ -41,9 +30,7 @@ class CommandRegistry:
 
         command = self.get(name)
         if not command:
-            state.ui.error(
-                f"Unknown command: /{name}. Type / and press Tab to see available commands."
-            )
+            state.ui.error(f"Unknown command: /{name}. Type /help to see available commands.")
             return True
 
         command.run(args, state)
