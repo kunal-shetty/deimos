@@ -45,7 +45,7 @@ For inline emphasis, wrap text in `**bold**` or `*italic*` markers — Deimos pa
   "headers": ["Name", "Role", "Department"],
   "rows": [
     ["Kunal", "Developer", "Engineering"],
-    ["Sakshi", "Designer", "Product"]
+    ["Ayushi", "Designer", "Product"]
   ]
 }
 ```
