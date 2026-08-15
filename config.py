@@ -31,3 +31,13 @@ if MODEL_FILE.exists():
     saved_model = MODEL_FILE.read_text(encoding="utf-8").strip()
     if saved_model:
         LLM_MODEL = saved_model
+
+# Dashboard (FastAPI)
+DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1")
+DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8420"))
+
+# MCP servers — comma-separated list of server URLs the user has configured
+MCP_SERVERS_FILE = LOCAL_DIR / "mcp_servers.json"
+
+# Plan mode
+PLAN_MODE_DEFAULT = os.getenv("PLAN_MODE_DEFAULT", "true").lower() == "true"
