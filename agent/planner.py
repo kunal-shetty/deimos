@@ -12,35 +12,71 @@ import re
 import uuid
 import requests
 from datetime import datetime, timezone
+from enum import Enum
+from dataclasses import dataclass
+from typing import Optional
 from config import LLM_API_KEY, LLM_MODEL
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 PLAN_DIR_NAME = ".deimos/plans"
 
+class AnalysisResult(Enum):
+    PLAN = "plan"
+    EXECUTE = "execute"
+    CLARIFY = "clarify"
+
+class StepStatus(Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+@dataclass
+class Step:
+    id: str
+    description: str
+    dependencies: list[str]
+    status: StepStatus = StepStatus.PENDING
+    output: Optional[str] = None
+
+@dataclass
+class PlanAnalysis:
+    decision: AnalysisResult
+    plan: Optional[Plan] = None
+    questions: Optional[list[str]] = None
+
 PLANNING_PROMPT = (
     "You are a planning assistant for an autonomous coding agent called Deimos. "
-    "Given a user's task request, decide if it requires multiple non-trivial "
-    "steps (e.g. touching several files, multiple commands, a refactor, "
-    "building a new module). "
+    "Given a user's task request, you must first determine if the request is clear "
+    "enough to proceed. "
     "\n\n"
-    "If the task is simple (a single file read, a one-line answer, a quick "
-    "question), respond with: {\"needs_plan\": false}. "
+    "1. CLARIFY: If the request is ambiguous, lacks critical context, or is too broad "
+    "(e.g., 'fix the bug' without specifying which bug), respond with: "
+    "{\"decision\": \"clarify\", \"questions\": [\"<question 1>\", \"<question 2>\"]}. "
+    "Ask targeted questions to narrow down the scope. "
     "\n\n"
-    "If the task is multi-step, respond with a JSON object: "
-    "{\"needs_plan\": true, \"title\": \"<short title>\", "
-    "\"steps\": [\"<step 1>\", \"<step 2>\", ...]}. "
-    "Steps should be concrete and actionable, each one sentence. "
-    "Aim for 3-8 steps — don't over-decompose simple tasks or under-decompose "
-    "complex ones. "
+    "2. EXECUTE: If the task is simple and unambiguous (a single file read, a "
+    "one-line answer, a quick question), respond with: "
+    "{\"decision\": \"execute\"}. "
+    "\n\n"
+    "3. PLAN: If the task is clear but multi-step, respond with a structured workflow: "
+    "{\"decision\": \"plan\", \"title\": \"<short title>\", "
+    "\"steps\": [ "
+    "{\"id\": \"s1\", \"description\": \"...\", \"dependencies\": []}, "
+    "{\"id\": \"s2\", \"description\": \"...\", \"dependencies\": [\"s1\"]}, "
+    " ... ]}. "
+    "Each step must have a unique ID and a list of IDs it depends on. "
+    "Ensure the graph is a Directed Acyclic Graph (DAG). "
+    "Aim for 3-8 steps. "
     "\n\nRespond with ONLY the JSON object, no markdown fences, no extra text."
 )
 
 
 class Plan:
-    """A single proposed plan: title, steps, and metadata."""
+    """A structured workflow plan: title, a DAG of steps, and metadata."""
 
-    def __init__(self, title: str, steps: list[str], task: str):
+    def __init__(self, title: str, steps: list[Step], task: str):
         self.id = str(uuid.uuid4())[:8]
         self.title = title
         self.steps = steps
@@ -52,16 +88,26 @@ class Plan:
         return {
             "id": self.id,
             "title": self.title,
-            "steps": self.steps,
+            "steps": [
+                {
+                    "id": s.id,
+                    "description": s.description,
+                    "dependencies": s.dependencies,
+                    "status": s.status.value,
+                    "output": s.output
+                }
+                for s in self.steps
+            ],
             "task": self.task,
             "created_at": self.created_at,
             "status": self.status,
         }
 
     def to_markdown(self) -> str:
-        lines = [f"# {self.title}", "", f"**Task:** {self.task}", "", f"**Status:** {self.status}", "", "## Steps", ""]
-        for i, step in enumerate(self.steps, 1):
-            lines.append(f"{i}. {step}")
+        lines = [f"# {self.title}", "", f"**Task:** {self.task}", "", f"**Status:** {self.status}", "", "## Workflow Steps", ""]
+        for step in self.steps:
+            deps = f" (depends on: {', '.join(step.dependencies)})" if step.dependencies else ""
+            lines.append(f"- [{step.status.value}] {step.description}{deps}")
         return "\n".join(lines) + "\n"
 
 
@@ -71,10 +117,9 @@ class Planner:
     def __init__(self, model: str = None):
         self.model = model or LLM_MODEL
 
-    def maybe_plan(self, task: str) -> Plan | None:
+    def maybe_plan(self, task: str) -> PlanAnalysis:
         """
-        Ask the LLM whether this task needs a plan. Returns a Plan if so,
-        otherwise None (caller should proceed directly to execution).
+        Analyze the task and decide whether to plan, execute immediately, or clarify.
         """
         payload = {
             "model": self.model,
@@ -101,17 +146,30 @@ class Planner:
             raw = _strip_fences(raw)
             data = json.loads(raw)
         except Exception:
-            return None
+            # Fallback: assume immediate execution if analysis fails
+            return PlanAnalysis(decision=AnalysisResult.EXECUTE)
 
-        if not data.get("needs_plan"):
-            return None
+        decision_str = data.get("decision", "execute").lower()
+        decision = AnalysisResult(decision_str) if decision_str in [r.value for r in AnalysisResult] else AnalysisResult.EXECUTE
 
-        title = data.get("title", "Untitled plan")
-        steps = data.get("steps", [])
-        if not steps:
-            return None
+        if decision == AnalysisResult.CLARIFY:
+            return PlanAnalysis(decision=AnalysisResult.CLARIFY, questions=data.get("questions", []))
 
-        return Plan(title=title, steps=steps, task=task)
+        if decision == AnalysisResult.PLAN:
+            title = data.get("title", "Untitled plan")
+            steps_data = data.get("steps", [])
+            if steps_data:
+                steps = []
+                for s in steps_data:
+                    steps.append(Step(
+                        id=s.get("id", "unknown"),
+                        description=s.get("description", "No description"),
+                        dependencies=s.get("dependencies", [])
+                    ))
+                return PlanAnalysis(decision=AnalysisResult.PLAN, plan=Plan(title=title, steps=steps, task=task))
+            return PlanAnalysis(decision=AnalysisResult.EXECUTE)
+
+        return PlanAnalysis(decision=AnalysisResult.EXECUTE)
 
     # ── Persistence ──────────────────────────────────────────────────────────
 
