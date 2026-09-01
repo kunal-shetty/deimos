@@ -9,6 +9,8 @@ from .edit_file import EditFileTool
 from .list_skills import ListSkillsTool
 from .read_skill import ReadSkillTool
 from .create_docx import CreateDocxTool
+from .web_tools import WebSearchTool, WebReadTool
+from .git_tools import GitStatusTool, GitAddTool, GitCommitTool, GitPushTool, GitBranchTool, GitHubPRTool
 
 
 class ToolRegistry:
@@ -35,6 +37,14 @@ class ToolRegistry:
             ListSkillsTool(),
             ReadSkillTool(),
             CreateDocxTool(),
+            WebSearchTool(),
+            WebReadTool(),
+            GitStatusTool(),
+            GitAddTool(),
+            GitCommitTool(),
+            GitPushTool(),
+            GitBranchTool(),
+            GitHubPRTool(),
         ]:
             self.register(tool)
 
