@@ -234,59 +234,6 @@ class PlanRejectCommand(Command):
         state.agent._resolve_pending_plan("/plan-reject")
 
 
-# ── MCP commands ─────────────────────────────────────────────────────────────
-
-class McpCommand(Command):
-    name = "mcp"
-    description = "List configured MCP servers and their connection status"
-    def run(self, args, state):
-        from mcp_client.config_store import load_servers
-        servers = load_servers()
-        connected = state.mcp_manager.connections.keys() if state.mcp_manager else []
-        state.ui.print_mcp_servers(servers, set(connected))
-
-
-class McpAddCommand(Command):
-    name = "mcp-add"
-    description = "Add an MCP server (stdio or sse)"
-    usage = "/mcp-add <name> stdio <command> [args...]  OR  /mcp-add <name> sse <url>"
-    def run(self, args, state):
-        parts = args.split()
-        if len(parts) < 3:
-            state.ui.error(self.usage)
-            return
-        name, server_type = parts[0], parts[1].lower()
-        from mcp_client.config_store import add_server
-
-        if server_type == "stdio":
-            command, *cmd_args = parts[2:]
-            add_server(name, "stdio", command=command, args=cmd_args)
-        elif server_type == "sse":
-            add_server(name, "sse", url=parts[2])
-        else:
-            state.ui.error("Server type must be 'stdio' or 'sse'.")
-            return
-        state.ui.info(f"Added MCP server '{name}'. Restart Deimos (or reconnect) to load its tools.")
-
-
-class McpRemoveCommand(Command):
-    name = "mcp-remove"
-    description = "Remove a configured MCP server"
-    usage = "/mcp-remove <name>"
-    def run(self, args, state):
-        name = args.strip()
-        if not name:
-            state.ui.error(self.usage)
-            return
-        from mcp_client.config_store import remove_server
-        ok = remove_server(name)
-        state.ui.info(f"Removed MCP server '{name}'." if ok else f"No MCP server named '{name}'.")
-        if ok and state.mcp_manager and name in state.mcp_manager.connections:
-            state.mcp_manager.connections[name].disconnect()
-            del state.mcp_manager.connections[name]
-            state.tools.unregister_mcp_tools()
-
-
 # ── Dashboard command ────────────────────────────────────────────────────────
 
 class DashboardCommand(Command):
@@ -317,8 +264,7 @@ def build_registry():
         HelpCommand, ChatsCommand, ResumeCommand, ResetCommand, ExitCommand,
         MemoryCommand, ProjectsCommand, ProjectCommand, TitleCommand, DeleteCommand,
         StatusCommand, ModelCommand, VerboseCommand, ClearScreenCommand,
-        PlanCommand, PlansCommand, PlanRejectCommand,
-        McpCommand, McpAddCommand, McpRemoveCommand, DashboardCommand,
+        PlanCommand, PlansCommand, PlanRejectCommand, DashboardCommand,
     ]:
         registry.register(cmd_cls())
     global REGISTRY
