@@ -13,6 +13,9 @@ LLM_API_KEY = os.getenv("GROQ_API_KEY")
 LLM_PROVIDER = "groq"
 LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 
+# Web Search
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+
 # Agent
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "30"))
 
