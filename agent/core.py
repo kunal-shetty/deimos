@@ -1,6 +1,8 @@
-from config import MAX_ITERATIONS
+import requests
+from config import MAX_ITERATIONS, DASHBOARD_HOST, DASHBOARD_PORT
+import re
 from agent.context import Context
-from agent.planner import Planner
+from agent.planner import Planner, StepStatus
 from llm.client import LLMClient
 from tools.registry import ToolRegistry
 from tools.run_command import is_dangerous
@@ -30,6 +32,9 @@ class Agent:
 
         self._pending_plan = None  # Plan awaiting confirmation
         self._pending_task = None  # the original task text, replayed on confirm
+        self.active_plan = None    # Currently executing workflow
+        self.waiting_for_clarification = False
+        self._clarification_questions = []
 
         memory_block = memory.build_memory_context()
         enriched_system = system_prompt
@@ -52,23 +57,41 @@ class Agent:
 
     def handle_input(self, user_input: str):
         """
-        Top-level entry point from main.py. Routes between plan confirmation
-        and normal execution depending on whether a plan is pending.
+        Top-level entry point from main.py. Routes between clarification,
+        plan confirmation, and normal execution.
         """
+        if self.waiting_for_clarification:
+            # User is answering a clarification question
+            self.waiting_for_clarification = False
+            self._clarification_questions = []
+            # Fall through to the planner to see if we can now proceed
+
         if self._pending_plan is not None:
             self._resolve_pending_plan(user_input)
             return
 
         if self.plan_mode:
             self.ui.thinking()
-            plan = self.planner.maybe_plan(user_input)
-            if plan is not None:
+            analysis = self.planner.maybe_plan(user_input)
+
+            if analysis.decision == AnalysisResult.CLARIFY:
+                self.waiting_for_clarification = True
+                self._clarification_questions = analysis.questions or ["Could you provide more details?"]
+                self.ui.agent_response(
+                    "I need a bit more information before I can plan this effectively:\n\n" +
+                    "\n".join(f"- {q}" for q in self._clarification_questions)
+                )
+                return
+
+            if analysis.decision == AnalysisResult.PLAN and analysis.plan:
+                plan = analysis.plan
                 self.planner.save(plan, cwd=None)
                 self._pending_plan = plan
                 self._pending_task = user_input
                 self.ui.print_plan(plan)
                 return
-            # No plan needed — fall through to direct execution
+
+            # Decision is EXECUTE or PLAN failed to generate a plan -> proceed to run
 
         self.run(user_input)
 
@@ -84,6 +107,7 @@ class Agent:
         self.planner.update_status(self._pending_plan, "confirmed")
         self.ui.plan_confirmed()
         task = self._pending_task
+        self.active_plan = self._pending_plan
         self._pending_plan = None
         self._pending_task = None
         self.run(task)
@@ -96,12 +120,54 @@ class Agent:
         self.ctx.add_user(user_input)
         self.memory.save_message("user", user_input)
 
+        # If we have an active plan, inject its current state into the context
+        if self.active_plan:
+            workflow_status = f"\n\n## Current Workflow Status\n{self.active_plan.to_markdown()}"
+            self.ctx.add_assistant(f"[System: {workflow_status}]")
+
         for _ in range(MAX_ITERATIONS):
             self.ui.thinking()
             response = self._stream_or_complete()
 
-            self.ctx.add_assistant(response["raw_content"])
-            self.memory.save_message("assistant", response["raw_content"])
+            raw_content = response["raw_content"]
+            self.ctx.add_assistant(raw_content)
+            self.memory.save_message("assistant", raw_content)
+
+            # --- Dashboard Real-time Push ---
+            try:
+                import requests
+                from config import DASHBOARD_HOST, DASHBOARD_PORT
+                push_url = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}/api/push"
+
+                # Determine update type
+                update_type = "thought"
+                if response["tool_calls"]:
+                    update_type = "tool"
+                elif "completed" in raw_content.lower():
+                    update_type = "workflow"
+
+                requests.post(push_url, json={
+                    "type": update_type,
+                    "message": raw_content[:500] + "..." if len(raw_content) > 500 else raw_content
+                }, timeout=0.1)
+            except:
+                pass
+
+            # --- Workflow Tracking ---
+            if self.active_plan:
+                matches = re.findall(r"\[Step\s+([a-zA-Z0-9]+)\s+completed\]", raw_content)
+                for step_id in matches:
+                    for step in self.active_plan.steps:
+                        if step.id == step_id:
+                            step.status = StepStatus.COMPLETED
+                            self.ui.info(f"Workflow: Step {step_id} marked as completed.")
+
+                if all(s.status == StepStatus.COMPLETED for s in self.active_plan.steps):
+                    self.active_plan.status = "completed"
+                    self.planner.save(self.active_plan)
+                    self.ui.info("Workflow complete! All steps finished.")
+                else:
+                    self.planner.save(self.active_plan)
 
             if response["stop_reason"] == "end_turn" or not response["tool_calls"]:
                 if response["text"] and not self._streamed:
