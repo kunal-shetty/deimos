@@ -1,8 +1,13 @@
+import json
+import re
+import subprocess
+import time
+
 import requests
 from config import MAX_ITERATIONS, DASHBOARD_HOST, DASHBOARD_PORT
 import re
 from agent.context import Context
-from agent.planner import Planner, StepStatus
+from agent.planner import Planner, StepStatus, AnalysisResult
 from llm.client import LLMClient
 from tools.registry import ToolRegistry
 from tools.run_command import is_dangerous
@@ -28,7 +33,8 @@ class Agent:
         self.tools = tools
         self.memory = memory
         self.plan_mode = plan_mode
-        self.planner = Planner()
+        self.planner = Planner(llm_client=llm)
+
 
         self._pending_plan = None  # Plan awaiting confirmation
         self._pending_task = None  # the original task text, replayed on confirm
@@ -114,8 +120,30 @@ class Agent:
 
     # ── Core execution loop ──────────────────────────────────────────────────
 
+    def _inject_git_context(self):
+        """Inject current git state as a transient system message."""
+        try:
+            branch = subprocess.check_output(["git", "branch", "--show-current"], text=True, stderr=subprocess.DEVNULL, timeout=5).strip()
+            diff = subprocess.check_output(["git", "diff", "--staged"], text=True, stderr=subprocess.DEVNULL, timeout=5).strip()
+            log = subprocess.check_output(["git", "log", "--oneline", "-5"], text=True, stderr=subprocess.DEVNULL, timeout=5).strip()
+
+            git_block = f"### Git Context\n- Branch: {branch}\n"
+            if diff:
+                git_block += f"- Staged Changes:\n```diff\n{diff}\n```\n"
+            if log:
+                git_block += f"- Recent Log:\n{log}"
+
+            self.ctx.add_assistant(f"[System: {git_block}]")
+        except Exception:
+            pass # Not a git repo or git not installed
+
     def run(self, user_input: str):
+        start_time = time.time()
+        start_in = self.llm.total_input_tokens
+        start_out = self.llm.total_output_tokens
+
         self.memory.detect_and_inject_project(user_input, self.ctx)
+        self._inject_git_context()
 
         self.ctx.add_user(user_input)
         self.memory.save_message("user", user_input)
@@ -125,7 +153,7 @@ class Agent:
             workflow_status = f"\n\n## Current Workflow Status\n{self.active_plan.to_markdown()}"
             self.ctx.add_assistant(f"[System: {workflow_status}]")
 
-        for _ in range(MAX_ITERATIONS):
+        for iterations in range(1, MAX_ITERATIONS + 1):
             self.ui.thinking()
             response = self._stream_or_complete()
 
@@ -135,8 +163,6 @@ class Agent:
 
             # --- Dashboard Real-time Push ---
             try:
-                import requests
-                from config import DASHBOARD_HOST, DASHBOARD_PORT
                 push_url = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}/api/push"
 
                 # Determine update type
@@ -170,10 +196,17 @@ class Agent:
                     self.planner.save(self.active_plan)
 
             if response["stop_reason"] == "end_turn" or not response["tool_calls"]:
-                if response["text"] and not self._streamed:
-                    self.ui.agent_response(response["text"])
-                elif self._streamed:
+                if not self._streamed:
+                    if response["text"]:
+                        self.ui.agent_response(response["text"])
+                else:
                     self.ui.stream_end()
+                self.ui.turn_end({
+                    "turns": iterations,
+                    "input_tokens": self.llm.total_input_tokens - start_in,
+                    "output_tokens": self.llm.total_output_tokens - start_out,
+                    "seconds": time.time() - start_time,
+                })
                 return
 
             for call in response["tool_calls"]:
@@ -191,26 +224,55 @@ class Agent:
                             continue
 
                 self.ui.tool_call(call["name"], call["inputs"])
+
+                # --- Self-Healing Loop ---
                 result = self.tools.dispatch(call["name"], call["inputs"])
+                retries = 0
+                while result.startswith("Error:") and retries < 3:
+                    self.ui.info(f"Self-healing: Tool {call['name']} failed. Attempting fix {retries+1}/3...")
+
+                    # Trigger a quick "fix" turn from the LLM
+                    fix_prompt = f"The tool {call['name']} failed with error: {result}. The inputs were {call['inputs']}. Please provide corrected inputs in JSON format."
+                    fix_res = self.llm.complete(
+                        system=self.ctx.system_prompt,
+                        messages=self.ctx.messages + [{"role": "user", "content": fix_prompt}],
+                        tools=[]
+                    )
+
+                    try:
+                        # Assume the LLM provides the new inputs as JSON in the text
+                        raw = (fix_res.get("text") or "").strip()
+                        if raw.startswith("```"):
+                            raw = re.sub(r"^```(?:json)?\n?", "", raw)
+                            raw = re.sub(r"\n?```$", "", raw)
+                        new_inputs = json.loads(raw)
+                        result = self.tools.dispatch(call["name"], new_inputs)
+                    except Exception:
+                        pass  # fall through to the retry counter below
+
+                    retries += 1
+
                 self.ui.tool_result(result)
                 self.ctx.add_tool_result(call["id"], result)
                 self.memory.save_message("tool", {
                     "tool_call_id": call["id"], "name": call["name"], "content": result,
                 })
 
+
         self.ui.error(f"Reached max iterations ({MAX_ITERATIONS}). Stopping.")
 
     def _stream_or_complete(self) -> dict:
         self._streamed = False
         stream_started = False
-        try:
-            def on_chunk(text: str):
-                nonlocal stream_started
-                if not stream_started:
-                    self.ui.stream_start()
-                    stream_started = True
-                self.ui.stream_chunk(text)
 
+        def on_chunk(text: str):
+            nonlocal stream_started
+            if not stream_started:
+                self.ui.stream_start()
+                stream_started = True
+            self.ui.stream_chunk(text)
+
+        try:
             response = self.llm.complete_stream(
                 system=self.ctx.system_prompt, messages=self.ctx.messages,
                 tools=self.tools.all_schemas(), on_chunk=on_chunk,
@@ -219,10 +281,20 @@ class Agent:
                 self._streamed = True
             return response
         except Exception:
-            return self.llm.complete(
-                system=self.ctx.system_prompt, messages=self.ctx.messages,
-                tools=self.tools.all_schemas(),
-            )
+            # Network/API hiccup — retry once before giving up to the caller.
+            try:
+                response = self.llm.complete_stream(
+                    system=self.ctx.system_prompt, messages=self.ctx.messages,
+                    tools=self.tools.all_schemas(), on_chunk=on_chunk,
+                )
+                if stream_started:
+                    self._streamed = True
+                return response
+            except Exception:
+                return self.llm.complete(
+                    system=self.ctx.system_prompt, messages=self.ctx.messages,
+                    tools=self.tools.all_schemas(),
+                )
 
     def shutdown(self):
         self.ui.saving_memory()
@@ -232,3 +304,4 @@ class Agent:
         self.ctx.reset()
         self._pending_plan = None
         self._pending_task = None
+        self.active_plan = None
