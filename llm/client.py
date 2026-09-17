@@ -6,6 +6,7 @@ from config import LLM_API_KEY, LLM_MODEL
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 RETRY_ATTEMPTS = 5
 RETRY_BASE_DELAY = 2   # seconds — doubles each attempt
+REQUEST_TIMEOUT = 180  # (connect, read) seconds — never hang forever on a stuck connection
 
 
 class LLMClient:
@@ -19,12 +20,25 @@ class LLMClient:
             "Content-Type": "application/json",
         }
         self.model = LLM_MODEL
+        # Cumulative token usage for the session (updated on every call)
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+
+    def reset_usage(self):
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+
+    def _track_usage(self, usage: dict | None):
+        if not usage:
+            return
+        self.total_input_tokens += usage.get("prompt_tokens") or 0
+        self.total_output_tokens += usage.get("completion_tokens") or 0
 
     def set_model(self, model_name: str):
         """Switch the model used for subsequent completions."""
         self.model = model_name
 
-    def complete(self, system: str, messages: list[dict], tools: list[dict]) -> dict:
+    def complete(self, system: str, messages: list[dict], tools: list[dict], max_tokens: int = 4096, temperature: float = 1.0) -> dict:
         """
         Send a completion request to Groq with automatic retry on 429.
         Returns a normalized response dict:
@@ -40,7 +54,8 @@ class LLMClient:
 
         payload = {
             "model": self.model,
-            "max_tokens": 4096,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
             "messages": oai_messages,
             "tools": oai_tools,
             "tool_choice": "auto",
@@ -48,6 +63,8 @@ class LLMClient:
 
         response = self._post_with_retry(payload)
         data = response.json()
+
+        self._track_usage(data.get("usage"))
 
         choice = data["choices"][0]
         msg = choice["message"]
@@ -79,7 +96,7 @@ class LLMClient:
             "raw_content": msg,
         }
 
-    def complete_stream(self, system: str, messages: list[dict], tools: list[dict], on_chunk) -> dict:
+    def complete_stream(self, system: str, messages: list[dict], tools: list[dict], on_chunk, max_tokens: int = 4096, temperature: float = 1.0) -> dict:
         """
         Send a streaming completion request to Groq.
         `on_chunk(text)` is called for each text delta as it arrives.
@@ -91,7 +108,8 @@ class LLMClient:
 
         payload = {
             "model": self.model,
-            "max_tokens": 4096,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
             "messages": oai_messages,
             "tools": oai_tools,
             "tool_choice": "auto",
@@ -119,6 +137,11 @@ class LLMClient:
                 chunk = json.loads(data_str)
             except json.JSONDecodeError:
                 continue
+
+            if chunk.get("x_groq") and chunk["x_groq"].get("usage"):
+                self._track_usage(chunk["x_groq"]["usage"])
+            if chunk.get("usage"):
+                self._track_usage(chunk["usage"])
 
             choices = chunk.get("choices") or []
             if not choices:
@@ -185,11 +208,41 @@ class LLMClient:
             "raw_content": raw_content,
         }
 
+    def complete_json(self, system: str, messages: list[dict], max_tokens: int = 1000, temperature: float = 0.2) -> dict:
+        """
+        Send a request that expects and returns a parsed JSON object.
+        Forces JSON mode by updating the system prompt and setting response_format.
+        """
+        system_json = system + "\n\nRespond with ONLY a valid JSON object. Do not include markdown fences or extra text."
+
+        # Use complete() but with empty tools and JSON response format
+        # Note: Groq supports response_format: {"type": "json_object"}
+        oai_messages = [{"role": "system", "content": system_json}] + _convert_messages(messages)
+
+        payload = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": oai_messages,
+            "response_format": {"type": "json_object"},
+        }
+
+        response = self._post_with_retry(payload)
+        data = response.json()
+        self._track_usage(data.get("usage"))
+        content = data["choices"][0]["message"].get("content") or "{}"
+
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return {"error": "Failed to parse LLM response as JSON", "raw": content}
+
     def _post_with_retry(self, payload: dict, stream: bool = False) -> requests.Response:
         """POST with exponential backoff on 429 rate limit responses."""
         delay = RETRY_BASE_DELAY
         for attempt in range(1, RETRY_ATTEMPTS + 1):
-            response = requests.post(GROQ_API_URL, headers=self._headers, json=payload, stream=stream)
+            response = requests.post(GROQ_API_URL, headers=self._headers, json=payload,
+                                     stream=stream, timeout=REQUEST_TIMEOUT)
 
             if response.status_code == 429:
                 # Check if Groq gave us a retry-after header
