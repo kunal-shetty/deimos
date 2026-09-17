@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import math
 import threading
 import itertools
 import time
@@ -19,7 +20,20 @@ from pygments.util import ClassNotFound
 
 from config import INPUT_HISTORY_FILE, LOCAL_DIR
 
-# ── Colour palette (blue/cyan theme) ─────────────────────────────────────────
+# Enable ANSI escapes on legacy Windows consoles (no-op elsewhere)
+if os.name == "nt":
+    os.system("")
+
+# Ensure stdout/stderr can encode Unicode (box-drawing, emoji) even when the
+# console codepage is not UTF-8 (e.g. cp1252) or output is piped/redirected.
+for _stream in (sys.stdout, sys.stderr):
+    if _stream and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+# ── Colour palette (cyan/blue brand theme) ───────────────────────────────────
 AMBER     = "\033[38;5;81m"    # #5fd7ff  primary brand colour (cyan)
 AMBER_DIM = "\033[38;5;67m"    # #5f87af  dimmer blue
 ORANGE    = "\033[38;5;75m"    # #5fafff  accent
@@ -52,15 +66,24 @@ def _strip_ansi(s: str) -> str:
     return _ANSI_RE.sub("", s)
 
 CODE_BLOCK_RE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
+INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+BOLD_RE = re.compile(r"\*\*([^*\n]+)\*\*")
 
-LOGO = f"""
-{AMBER}{BOLD}  ██████╗ ███████╗██╗███╗   ███╗ ██████╗ ███████╗
-  ██╔══██╗██╔════╝██║████╗ ████║██╔═══██╗██╔════╝
-  ██║  ██║█████╗  ██║██╔████╔██║██║   ██║███████╗
-  ██║  ██║██╔══╝  ██║██║╚██╔╝██║██║   ██║╚════██║
-  ██████╔╝███████╗██║██║ ╚═╝ ██║╚██████╔╝███████║
-  ╚═════╝ ╚══════╝╚═╝╚═╝     ╚═╝ ╚═════╝ ╚══════╝{RESET}
-{GREY}  autonomous coding agent  ·  type {AMBER}/{RESET}{GREY}help to get started{RESET}
+# Gradient sweep for the logo: magenta → purple → blue → cyan (256-colour)
+_LOGO_COLOURS = ["\033[38;5;213m", "\033[38;5;176m", "\033[38;5;140m",
+                 "\033[38;5;105m", "\033[38;5;75m", "\033[38;5;81m"]
+_LOGO_LINES = [
+    "  ██████╗ ███████╗██╗███╗   ███╗ ██████╗ ███████╗",
+    "  ██╔══██╗██╔════╝██║████╗ ████║██╔═══██╗██╔════╝",
+    "  ██║  ██║█████╗  ██║██╔████╔██║██║   ██║███████╗",
+    "  ██║  ██║██╔══╝  ██║██║╚██╔╝██║██║   ██║╚════██║",
+    "  ██████╔╝███████╗██║██║ ╚═╝ ██║╚██████╔╝███████║",
+    "  ╚═════╝ ╚══════╝╚═╝╚═╝     ╚═╝ ╚═════╝ ╚══════╝",
+]
+LOGO = "\n" + "\n".join(
+    f"{c}{BOLD}{line}{RESET}" for line, c in zip(_LOGO_LINES, _LOGO_COLOURS)
+) + f"""
+{GREY}  autonomous coding agent  ·  type {AMBER}/{RESET}{GREY} for commands{RESET}
 """
 
 PT_STYLE = PTStyle.from_dict({
@@ -80,7 +103,58 @@ TOOL_ICONS = {
     "run_command":     "⚡",
     "list_directory":  "📁",
     "search_codebase": "🔍",
+    "list_skills":     "🧰",
+    "read_skill":      "📕",
+    "create_docx":     "📄",
+    "web_search":      "🌐",
+    "web_read":        "📖",
+    "fetch_url":       "🌍",
+    "git_status":      "🌿",
+    "git_add":         "➕",
+    "git_commit":      "📝",
+    "git_push":        "🚀",
+    "git_branch":      "🌱",
+    "github_pr":       "🔀",
 }
+
+# Result strings starting with any of these are rendered as failures
+_FAIL_PREFIXES = ("Error", "[exit", "Git error", "GitHub CLI error",
+                  "Web search failed", "Web read failed", "Unexpected error")
+
+
+def _git_branch() -> str:
+    """Current git branch name, or '' outside a repo. Cached for 30s."""
+    cached = getattr(_git_branch, "_cache", None)
+    if cached and time.time() - cached[0] < 30:
+        return cached[1]
+    branch = ""
+    try:
+        branch = subprocess.check_output(
+            ["git", "branch", "--show-current"],
+            text=True, stderr=subprocess.DEVNULL, timeout=2,
+        ).strip()
+    except Exception:
+        branch = ""
+    _git_branch._cache = (time.time(), branch)
+    return branch
+
+
+def _fmt_tokens(n: int | None) -> str:
+    if n is None:
+        return "0"
+    return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+
+def _style_inline(text: str) -> str:
+    """Bold + inline-code styling for a single line of markdown text."""
+    parts = INLINE_CODE_RE.split(text)  # odd indices are inline code spans
+    out = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            out.append(f"{AMBER}{part}{RESET}")
+        else:
+            out.append(BOLD_RE.sub(lambda m: f"{BOLD}{WHITE}{m.group(1)}{RESET}", part))
+    return "".join(out)
 
 
 class SlashCommandCompleter(Completer):
@@ -107,6 +181,7 @@ class Spinner:
 
     def __init__(self, message="Thinking"):
         self._message = message
+        self._start = time.time()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._spin, daemon=True)
 
@@ -114,7 +189,11 @@ class Spinner:
         for frame in itertools.cycle(self.FRAMES):
             if self._stop.is_set():
                 break
-            sys.stdout.write(f"\r{AMBER}{frame}{RESET} {GREY}{self._message}…{RESET}")
+            elapsed = time.time() - self._start
+            sys.stdout.write(
+                f"\r{AMBER}{frame}{RESET} {GREY}{self._message}…{RESET} "
+                f"{GREY}({elapsed:.0f}s · ctrl-c to interrupt){RESET}   "
+            )
             sys.stdout.flush()
             time.sleep(0.08)
 
@@ -122,7 +201,8 @@ class Spinner:
 
     def stop(self):
         self._stop.set()
-        self._thread.join()
+        if self._thread.is_alive():
+            self._thread.join()
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
 
@@ -133,6 +213,7 @@ class TerminalUI:
         self._spinner: Spinner | None = None
         self._session: PromptSession | None = None
         self._stream_active = False
+        self._stream_buffer = ""
 
     # ── Setup ────────────────────────────────────────────────────────────────
 
@@ -148,10 +229,21 @@ class TerminalUI:
     def print_logo(self):
         print(LOGO)
 
-    def print_workdir(self, path: str):
-        print(f"  {GREY}working in{RESET}  {AMBER}{path}{RESET}\n")
+    def print_workdir(self, path: str, model: str | None = None, plan_mode: bool | None = None):
+        """Claude-Code-style context header: dir, branch, model, plan mode."""
+        bits = [f"{GREY}dir:{RESET} {AMBER}{path}{RESET}"]
+        branch = _git_branch()
+        if branch:
+            bits.append(f"{GREY}branch:{RESET} {WHITE}{branch}{RESET}")
+        if model:
+            bits.append(f"{GREY}model:{RESET} {WHITE}{model}{RESET}")
+        if plan_mode is not None:
+            bits.append(f"{GREY}plan mode:{RESET} {WHITE}{'on' if plan_mode else 'off'}{RESET}")
+        print(f"  {'  ·  '.join(bits)}\n")
 
     def prompt(self) -> str:
+        # Safety net: never sit at the prompt with a spinner still ticking.
+        self._stop_spinner()
         try:
             if self._session:
                 return self._session.prompt(HTML(f"<prompt>❯</prompt> ")).strip()
@@ -161,8 +253,12 @@ class TerminalUI:
 
     # ── Spinner ──────────────────────────────────────────────────────────────
 
-    def thinking(self):
-        self._spinner = Spinner("Thinking")
+    def thinking(self, message: str = "Thinking"):
+        # Stop any spinner that's already running first. Overwriting
+        # self._spinner without stopping it would orphan the old thread,
+        # which then spins forever and corrupts the prompt.
+        self._stop_spinner()
+        self._spinner = Spinner(message)
         self._spinner.start()
 
     def _stop_spinner(self):
@@ -186,48 +282,92 @@ class TerminalUI:
         sys.stdout.flush()
 
     def stream_end(self):
-        """Called after streaming completes — render any code blocks found."""
+        """
+        After streaming completes, erase the raw streamed text and re-render
+        it as styled markdown (headers, bullets, highlighted code blocks).
+        """
         self._stream_active = False
         raw = getattr(self, "_stream_buffer", "")
+        if not raw.strip():
+            sys.stdout.write("\n\n")
+            sys.stdout.flush()
+            return
 
-        # If there were code blocks, re-render with syntax highlighting
-        # (we already wrote the raw text so we need a newline either way)
-        sys.stdout.write("\n\n")
+        # Estimate how many visual lines the streamed text occupies so we can
+        # move the cursor back up and cleanly replace it with rendered output.
+        lines_up = 0
+        try:
+            width = max(os.get_terminal_size().columns - 2, 20)
+        except OSError:
+            width = 78
+        segments = raw.split("\n")
+        for i, seg in enumerate(segments):
+            prefix = 2 if i == 0 else 0  # "◆ " shares the first line
+            lines_up += max(1, math.ceil((len(seg) + prefix) / width))
+        lines_up = max(lines_up - 1, 0)
+
+        try:
+            sys.stdout.write(f"\033[{lines_up}A\r\033[J")
+            sys.stdout.write(f"\n{GREEN}◆{RESET} ")
+            self._print_markdown(raw)
+            sys.stdout.write("\n\n")
+        except Exception:
+            sys.stdout.write("\n\n")
         sys.stdout.flush()
 
-    # ── Non-streaming agent response (typewriter + code highlight) ────────────
+    # ── Non-streaming agent response (markdown rendered) ─────────────────────
 
     def agent_response(self, text: str):
         self._stop_spinner()
         sys.stdout.write(f"\n{GREEN}◆{RESET} ")
         sys.stdout.flush()
-
-        pos = 0
-        for match in CODE_BLOCK_RE.finditer(text):
-            self._typewriter(text[pos:match.start()])
-            self._print_code_block(match.group(2), match.group(1))
-            pos = match.end()
-        self._typewriter(text[pos:])
+        self._print_markdown(text)
         sys.stdout.write("\n\n")
         sys.stdout.flush()
 
-    def _typewriter(self, text: str):
-        for char in text:
-            sys.stdout.write(char)
-            sys.stdout.flush()
-            if char in ".!?": time.sleep(0.055)
-            elif char == ",": time.sleep(0.025)
-            else:             time.sleep(0.010)
+    def _print_markdown(self, text: str):
+        """Render markdown: headers, bullets, rules, inline styles, code blocks."""
+        pos = 0
+        for match in CODE_BLOCK_RE.finditer(text):
+            self._print_md_text(text[pos:match.start()])
+            self._print_code_block(match.group(2), match.group(1))
+            pos = match.end()
+        self._print_md_text(text[pos:])
+
+    def _print_md_text(self, text: str):
+        if not text:
+            return
+        for line in text.rstrip("\n").split("\n"):
+            stripped = line.strip()
+            if re.match(r"^#{1,6}\s", stripped):
+                level = len(stripped) - len(stripped.lstrip("#"))
+                label = stripped.lstrip("#").strip()
+                colour = AMBER if level <= 2 else WHITE
+                print(f"{BOLD}{colour}{label}{RESET}")
+            elif stripped in ("---", "***", "___"):
+                print(f"{GREY}{'─' * 40}{RESET}")
+            elif re.match(r"^[-*]\s+", stripped):
+                content = _style_inline(re.sub(r"^[-*]\s+", "", stripped))
+                print(f"{CYAN}  •{RESET} {content}")
+            elif re.match(r"^\d+\.\s+", stripped):
+                m = re.match(r"^(\d+)\.\s+(.*)", stripped)
+                print(f"  {AMBER}{m.group(1)}.{RESET} {_style_inline(m.group(2))}")
+            elif stripped.startswith(">"):
+                print(f"{GREY}{ITALIC}  {stripped}{RESET}")
+            elif not stripped:
+                print()
+            else:
+                print(_style_inline(line))
 
     def _print_code_block(self, code: str, lang: str):
         code = code.rstrip("\n")
         highlighted = _highlight_code(code, lang)
-        label = lang or "code"
+        label = f"✱ {lang or 'code'}"
         lines = highlighted.split("\n")
         width = min(max((max(len(_strip_ansi(l)) for l in lines) + 4), 40), 100)
 
         sys.stdout.write("\n")
-        sys.stdout.write(f"{AMBER_DIM}╭─ {label}{'─' * (width - len(label) - 3)}╮{RESET}\n")
+        sys.stdout.write(f"{AMBER_DIM}╭─ {label}{'─' * max(1, width - len(label) - 3)}╮{RESET}\n")
         for line in lines:
             pad = width - len(_strip_ansi(line)) - 4
             sys.stdout.write(f"{AMBER_DIM}│{RESET} {line}{' ' * max(0, pad)} {AMBER_DIM}│{RESET}\n")
@@ -247,17 +387,48 @@ class TerminalUI:
         print(f"  {ORANGE}{icon}{RESET} {BOLD}{AMBER}{name}{RESET}  {args_str}")
 
     def tool_result(self, result: str):
+        failed = result.startswith(_FAIL_PREFIXES)
+        marker = f"{RED}✗{RESET}" if failed else f"{GREEN}✓{RESET}"
         lines = result.strip().splitlines() or [""]
         preview = _truncate(lines[0], 90)
-        print(f"     {GREY}⎿  {preview}{RESET}")
+        print(f"     {GREY}⎿{RESET} {marker} {GREY if failed else ''}{preview}{RESET}")
         if self.verbose and len(lines) > 1:
-            for line in lines[1:5]:
-                print(f"       {DIM}{_truncate(line, 90)}{RESET}")
-            if len(lines) > 5:
-                print(f"       {DIM}… ({len(lines) - 5} more lines){RESET}")
+            shown = 0
+            for line in lines[1:]:
+                if line.startswith(("+++", "---", "@@")) or line.startswith("```"):
+                    continue
+                if line.startswith("+"):
+                    print(f"       {GREEN}{_truncate(line, 90)}{RESET}")
+                elif line.startswith("-"):
+                    print(f"       {RED}{_truncate(line, 90)}{RESET}")
+                else:
+                    print(f"       {DIM}{_truncate(line, 90)}{RESET}")
+                shown += 1
+                if shown >= 5:
+                    break
+            remaining = len(lines) - 1 - shown
+            if remaining > 0:
+                print(f"       {DIM}… ({remaining} more lines){RESET}")
 
     def tool_skipped(self, name: str):
         print(f"  {RED}✗{RESET}  {GREY}{name} — skipped by user{RESET}")
+
+    # ── Per-turn summary footer ──────────────────────────────────────────────
+
+    def turn_end(self, stats: dict):
+        self._stop_spinner()
+        bits = []
+        turns = stats.get("turns")
+        if turns:
+            bits.append(f"{turns} turn{'s' if turns != 1 else ''}")
+        ti, to = stats.get("input_tokens"), stats.get("output_tokens")
+        if ti is not None:
+            bits.append(f"↑{_fmt_tokens(ti)} ↓{_fmt_tokens(to or 0)} tok")
+        secs = stats.get("seconds")
+        if secs is not None:
+            bits.append(f"{secs:.1f}s")
+        if bits:
+            print(f"  {GREY}{'─' * 6} {' · '.join(bits)} {'─' * 6}{RESET}")
 
     # ── Safety guardrail ─────────────────────────────────────────────────────
 
@@ -312,6 +483,49 @@ class TerminalUI:
 
     def clear_screen(self):
         os.system("cls" if os.name == "nt" else "clear")
+
+    # ── Plan mode displays ───────────────────────────────────────────────────
+
+    def print_plan(self, plan):
+        """Pretty-print a pending Plan object awaiting confirmation."""
+        self._stop_spinner()
+        rows = []
+        for i, step in enumerate(plan.steps, 1):
+            dep = f"  {GREY}(after {', '.join(step.dependencies)}){RESET}" if step.dependencies else ""
+            rows.append(f"{AMBER}{i}{RESET}  {step.description}{dep}")
+        title = f"✻ Plan — {plan.title}"
+        widest = max([len(_strip_ansi(r)) for r in rows] + [len(title) + 2])
+        width = min(widest + 6, 96)
+
+        print(f"\n  {_box_top(title, width, AMBER_DIM)}")
+        for r in rows:
+            print(f"  {_box_row(r, width, AMBER_DIM)}")
+        print(f"  {_box_bot(width, AMBER_DIM)}")
+        print(f"  {GREY}Send any message to confirm & run  ·  {RED}/plan-reject{GREY} to cancel{RESET}\n")
+
+    def plan_confirmed(self):
+        self._stop_spinner()
+        print(f"  {GREEN}✓{RESET} {GREY}Plan confirmed — executing…{RESET}")
+
+    def plan_rejected(self):
+        self._stop_spinner()
+        print(f"  {RED}✗{RESET} {GREY}Plan rejected.{RESET}")
+
+    def print_plans(self, plans: list[dict]):
+        if not plans:
+            print(f"\n  {GREY}No plans found in this project (.deimos/plans).{RESET}\n")
+            return
+        print(f"\n  {AMBER}{BOLD}Plans{RESET}\n")
+        for p in plans:
+            title = p.get("title", "untitled")
+            status = p.get("status", "?")
+            pid = p.get("id", "?")
+            created = (p.get("created_at") or "")[:16].replace("T", " ")
+            n_steps = len(p.get("steps", []))
+            status_colour = GREEN if status == "completed" else (RED if status == "rejected" else AMBER)
+            print(f"  {AMBER}✻{RESET} {BOLD}{WHITE}{title}{RESET}")
+            print(f"      {GREY}{pid}  ·  {status_colour}{status}{RESET}{GREY}  ·  {created}  ·  {n_steps} steps{RESET}")
+        print()
 
     # ── Structured displays ──────────────────────────────────────────────────
 
@@ -370,15 +584,15 @@ class TerminalUI:
         print()
 
     def print_status(self, info: dict):
-        print(f"\n  {AMBER_DIM}╭─ status {'─' * 30}╮{RESET}")
         key_w = max(len(k) for k in info) + 1
+        inner_w = max(len(_strip_ansi(f"{k:<{key_w}}  {v}")) for k, v in info.items())
+        width = inner_w + 8
+        print(f"\n  {_box_top('status', width, AMBER_DIM)}")
         for key, val in info.items():
             key_str = f"{AMBER}{key:<{key_w}}{RESET}"
             val_str = f"{WHITE}{val}{RESET}"
-            inner = f"{key_str}  {val_str}"
-            pad = 36 - len(_strip_ansi(f"{key:<{key_w}}  {val}"))
-            print(f"  {AMBER_DIM}│{RESET}  {inner}{' ' * max(0, pad)}  {AMBER_DIM}│{RESET}")
-        print(f"  {AMBER_DIM}╰{'─' * 40}╯{RESET}\n")
+            print(f"  {_box_row(f'{key_str}  {val_str}', width, AMBER_DIM)}")
+        print(f"  {_box_bot(width, AMBER_DIM)}\n")
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
