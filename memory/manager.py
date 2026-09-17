@@ -2,18 +2,26 @@
 MemoryManager — orchestrates working/episodic/semantic/active/project memory.
 """
 
-from memory.supabase_client import get_client
+from memory.supabase_client import get_client, validate_schema
 from memory.conversation import ConversationStore
 from memory.episodic import EpisodicMemory
 from memory.semantic import SemanticMemory
 from memory.project import ProjectMemory
-from memory.active import score_message
-
+from memory.active import score_message_async
 
 class MemoryManager:
     """Top-level memory coordinator for a single user session."""
 
     def __init__(self, user_id: str, resume_id: str | None = None):
+        # Validate database schema before initializing stores
+        missing = validate_schema()
+        if missing:
+            raise RuntimeError(
+                "Deimos database schema is invalid or incomplete:\n" +
+                "\n".join(f"- {m}" for m in missing) +
+                "\n\nPlease run the setup SQL provided in docs/installation.md."
+            )
+
         self.user_id = user_id
         self.client = get_client()
         self._active_project: str | None = None
@@ -118,10 +126,22 @@ class MemoryManager:
     # ── Per-turn persistence ─────────────────────────────────────────────────
 
     def save_message(self, role: str, content):
-        importance, summary = 0, None
-        if role == "user" and isinstance(content, str):
-            importance, summary = score_message(content)
-        self.conversations.save_message(role, content, importance=importance, summary=summary)
+        """
+        Persist a message turn. User messages are scored for importance on a
+        background thread (non-blocking); the row is patched when scoring lands.
+        """
+        self.conversations.save_message(role, content, importance=0, summary=None)
+
+        if role == "user" and isinstance(content, str) and content.strip():
+            def _apply(importance: int, summary: str):
+                try:
+                    self.conversations.update_message_importance(
+                        content[:500], importance, summary
+                    )
+                except Exception:
+                    pass
+
+            score_message_async(content, _apply)
 
     # ── Conversation helpers ─────────────────────────────────────────────────
 
