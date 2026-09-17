@@ -94,7 +94,7 @@ deimos/
 ```
 
 ## Stack
-- **LLM**: Groq (`llama-3.3-70b-versatile`)
+- **LLM**: Groq (`openai/gpt-oss-120b` by default, switchable via `/model`)
 - **Database**: Supabase (PostgreSQL)
 - **UI**: prompt_toolkit (Terminal) & FastAPI (Web)
 - **Search**: Tavily API
