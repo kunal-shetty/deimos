@@ -5,19 +5,17 @@ waits for user confirmation before executing any tools.
 Plans are persisted to disk under .deimos/plans/ in the current working
 directory (per-project), as both a JSON record and a readable markdown file.
 """
+from __future__ import annotations
 
 import os
 import json
 import re
 import uuid
-import requests
 from datetime import datetime, timezone
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
-from config import LLM_API_KEY, LLM_MODEL
-
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+from config import LLM_MODEL
 
 PLAN_DIR_NAME = ".deimos/plans"
 
@@ -114,37 +112,26 @@ class Plan:
 class Planner:
     """Generates plans via a quick LLM call and persists them to disk."""
 
-    def __init__(self, model: str = None):
-        self.model = model or LLM_MODEL
+    def __init__(self, llm_client=None):
+        self.llm = llm_client
+
 
     def maybe_plan(self, task: str) -> PlanAnalysis:
         """
         Analyze the task and decide whether to plan, execute immediately, or clarify.
         """
-        payload = {
-            "model": self.model,
-            "max_tokens": 600,
-            "temperature": 0.2,
-            "messages": [
-                {"role": "system", "content": PLANNING_PROMPT},
-                {"role": "user", "content": task},
-            ],
-        }
+        if not self.llm:
+            return PlanAnalysis(decision=AnalysisResult.EXECUTE)
 
         try:
-            response = requests.post(
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=30,
+            data = self.llm.complete_json(
+                system=PLANNING_PROMPT,
+                messages=[{"role": "user", "content": task}],
+                max_tokens=600,
+                temperature=0.2,
             )
-            response.raise_for_status()
-            raw = response.json()["choices"][0]["message"]["content"].strip()
-            raw = _strip_fences(raw)
-            data = json.loads(raw)
+            if "error" in data:
+                raise ValueError(data["error"])
         except Exception:
             # Fallback: assume immediate execution if analysis fails
             return PlanAnalysis(decision=AnalysisResult.EXECUTE)
