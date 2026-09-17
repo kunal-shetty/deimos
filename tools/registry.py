@@ -10,7 +10,9 @@ from .list_skills import ListSkillsTool
 from .read_skill import ReadSkillTool
 from .create_docx import CreateDocxTool
 from .web_tools import WebSearchTool, WebReadTool
+from .web_fetch import FetchUrlTool
 from .git_tools import GitStatusTool, GitAddTool, GitCommitTool, GitPushTool, GitBranchTool, GitHubPRTool
+
 
 
 class ToolRegistry:
@@ -39,6 +41,7 @@ class ToolRegistry:
             CreateDocxTool(),
             WebSearchTool(),
             WebReadTool(),
+            FetchUrlTool(),
             GitStatusTool(),
             GitAddTool(),
             GitCommitTool(),
