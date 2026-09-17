@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import PROMPTS_DIR, DEIMOS_USER_ID, PLAN_MODE_DEFAULT, DASHBOARD_HOST, DASHBOARD_PORT
+from config import PROMPTS_DIR, DEIMOS_USER_ID, PLAN_MODE_DEFAULT, DASHBOARD_HOST, DASHBOARD_PORT, LLM_MODEL
 from agent.core import Agent
 from llm.client import LLMClient
 from tools.registry import ToolRegistry
@@ -58,19 +58,28 @@ def run_update():
     from pathlib import Path
 
     print("Updating Deimos...")
-    deimos_home = Path.home() / ".deimos"
-    venv_pip = deimos_home / "venv" / "bin" / "pip"
 
-    if not venv_pip.exists():
-        print("Error: Deimos virtual environment not found. Please run the install script again.")
-        sys.exit(1)
+    # Use the current python executable to find the correct pip
+    # This works regardless of OS or venv location
+    pip_exe = sys.executable.replace("python", "pip") if "python" in sys.executable else None
+
+    # Fallback: try to find pip in the current environment
+    if not pip_exe:
+        try:
+            pip_exe = subprocess.check_output(["which", "pip"], text=True).strip()
+        except:
+            pip_exe = "pip"
 
     try:
         # If we are in a git repo, pull changes first
         subprocess.run(["git", "pull"], capture_output=True)
-        # Update the package
-        subprocess.run([str(venv_pip), "install", "--upgrade", "."], check=True)
+
+        # Update the package using the current environment's pip
+        subprocess.run([pip_exe, "install", "--upgrade", "."], check=True)
         print("Deimos updated successfully!")
+    except subprocess.CalledProcessError as e:
+        print(f"Update failed during pip install: {e}")
+        sys.exit(1)
     except Exception as e:
         print(f"Update failed: {e}")
         sys.exit(1)
@@ -99,7 +108,11 @@ def main():
 
     ui = TerminalUI(verbose=getattr(args, "verbose", False))
     ui.print_logo()
-    ui.print_workdir(os.getcwd())
+    ui.print_workdir(
+        os.getcwd(),
+        model=LLM_MODEL,
+        plan_mode=PLAN_MODE_DEFAULT and not getattr(args, "no_plan", False),
+    )
 
     if not DEIMOS_USER_ID:
         ui.error(
@@ -122,6 +135,9 @@ def main():
         sys.exit(1)
 
     state = AppState(ui=ui, llm=llm, tools=tools, system_prompt=system_prompt, agent=agent)
+
+    # Enable slash-command completion before the first prompt
+    ui.setup_input(registry.names_with_descriptions())
 
     try:
         while state.running:
