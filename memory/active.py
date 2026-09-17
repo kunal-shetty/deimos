@@ -3,11 +3,15 @@ Active memory: lightweight per-message importance scoring.
 
 Each user message is scored 0-10 by a quick, cheap LLM call so that
 later phases (retrieval, reflection) can prioritize what matters.
-This is intentionally fast and low-token — it does NOT block the
-main agent response from streaming.
+
+Scoring runs on a background thread so the user's message is saved
+immediately and the agent loop starts without waiting on an extra
+LLM round-trip. Results are applied to the stored row when they arrive
+(best-effort — failures are silently ignored).
 """
 
 import json
+import threading
 import requests
 from config import LLM_API_KEY, LLM_MODEL
 
@@ -31,11 +35,38 @@ IMPORTANCE_PROMPT = (
 def score_message(text: str) -> tuple[int, str]:
     """
     Score a user message's importance and produce a one-line summary.
+    Blocking variant — kept for callers that need the result immediately.
     Returns (importance, summary). Falls back to (0, "") on any failure.
     """
-    if not text or not text.strip():
+    data = _score_request(text)
+    if not data:
         return 0, ""
+    importance = max(0, min(10, int(data.get("importance", 0))))
+    summary = str(data.get("summary", "")).strip()
+    return importance, summary
 
+
+def score_message_async(text: str, apply_result) -> None:
+    """
+    Score a user message on a background daemon thread and invoke
+    `apply_result(importance, summary)` when done. Never raises.
+    """
+    if not text or not text.strip():
+        return
+
+    def worker():
+        try:
+            data = _score_request(text)
+            if data:
+                apply_result(int(data.get("importance", 0)), str(data.get("summary", "")).strip())
+        except Exception:
+            pass
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _score_request(text: str) -> dict | None:
+    """Call the LLM and return the parsed importance JSON, or None on failure."""
     payload = {
         "model": LLM_MODEL,
         "max_tokens": 100,
@@ -65,9 +96,6 @@ def score_message(text: str) -> tuple[int, str]:
                 raw = raw[4:]
 
         data = json.loads(raw)
-        importance = int(data.get("importance", 0))
-        importance = max(0, min(10, importance))
-        summary = str(data.get("summary", "")).strip()
-        return importance, summary
+        return data if isinstance(data, dict) else None
     except Exception:
-        return 0, ""
+        return None
