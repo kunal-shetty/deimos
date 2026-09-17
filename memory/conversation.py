@@ -73,6 +73,25 @@ class ConversationStore:
             "summary": summary,
         }).execute()
 
+    def update_message_importance(self, content_prefix: str, importance: int, summary: str):
+        """
+        Patch the importance/summary of a recently-saved user message.
+        Matches on the first 500 chars of content — used by the async
+        importance scorer, which runs after the row is already inserted.
+        """
+        if not self.conversation_id:
+            return
+        result = (
+            self.client.table("messages")
+            .update({"importance": importance, "summary": summary})
+            .eq("conversation_id", self.conversation_id)
+            .like("content", f"%{content_prefix[:80].replace('%', '')}%")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return result.data
+
     def get_messages(self, conversation_id: str | None = None) -> list[dict]:
         """Fetch all messages for a conversation, oldest first."""
         cid = conversation_id or self.conversation_id
