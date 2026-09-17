@@ -17,6 +17,9 @@ class CommandRegistry:
     def names(self) -> list[str]:
         return sorted(self._commands.keys())
 
+    def names_with_descriptions(self) -> list[tuple[str, str]]:
+        return sorted((c.name, c.description) for c in self._commands.values())
+
     def dispatch(self, raw_input: str, state) -> bool:
         if not raw_input.startswith("/"):
             return False
