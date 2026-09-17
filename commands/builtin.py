@@ -54,6 +54,7 @@ class ResetCommand(Command):
     description = "Clear current context (memory preserved)"
     def run(self, args, state):
         state.agent.reset()
+        state.llm.reset_usage()
         state.ui.info("Conversation history cleared (memory preserved).")
 
 
@@ -155,6 +156,7 @@ class StatusCommand(Command):
             "Active project": agent.memory._active_project or "—",
             "Messages in context": len(agent.ctx.messages),
             "Model": state.llm.model,
+            "Session tokens": f"↑{state.llm.total_input_tokens} ↓{state.llm.total_output_tokens}",
             "Plan mode": "on" if agent.plan_mode else "off",
             "Verbose": "on" if state.ui.verbose else "off",
         })
