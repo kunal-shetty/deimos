@@ -115,11 +115,20 @@ def main():
     )
 
     if not DEIMOS_USER_ID:
-        ui.error(
-            "DEIMOS_USER_ID is not set in .env. "
-            "Create a row in the `users` table in Supabase and set its id in .env."
-        )
-        sys.exit(1)
+        # Use AuthManager if available to check login state instead of just .env
+        from auth.manager import AuthManager
+        auth = AuthManager()
+        if auth.is_authenticated():
+            # We are authenticated via OAuth, so we can override the missing .env ID
+            DEIMOS_USER_ID = auth.get_user_id()
+        else:
+            ui.error(
+                "DEIMOS_USER_ID is not set in .env and you are not logged in. "
+                "Please run '/login' (if available) or set the ID in .env."
+            )
+            # Instead of exiting, let's check if we can allow the user to run /login
+            # by falling through to the input loop if we modify main()
+            # sys.exit(1)
 
     plan_mode = PLAN_MODE_DEFAULT and not getattr(args, "no_plan", False)
 
