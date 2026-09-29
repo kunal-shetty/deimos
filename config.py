@@ -18,6 +18,7 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 # Agent
 MAX_ITERATIONS = int(os.getenv("MAX_ITERATIONS", "30"))
+CONTEXT_SAFE_LIMIT = int(os.getenv("CONTEXT_SAFE_LIMIT", "100000")) # tokens
 
 # Supabase / Memory
 SUPABASE_URL = os.getenv("SUPABASE_URL")
