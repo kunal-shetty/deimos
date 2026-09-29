@@ -153,6 +153,16 @@ class Agent:
             workflow_status = f"\n\n## Current Workflow Status\n{self.active_plan.to_markdown()}"
             self.ctx.add_assistant(f"[System: {workflow_status}]")
 
+        # --- Context Window Management ---
+        removed_msgs = self.ctx.truncate()
+        if removed_msgs:
+            self.ui.info(f"Context limit reached. Summarizing {len(removed_msgs)} old messages...")
+            summary = self.memory.summarize_segment(removed_msgs)
+            if summary:
+                # Store the summary in episodic memory for long-term retrieval
+                self.memory.episodic.save_summary(summary)
+                self.ui.info("Conversation segment archived to memory.")
+
         for iterations in range(1, MAX_ITERATIONS + 1):
             self.ui.thinking()
             response = self._stream_or_complete()
