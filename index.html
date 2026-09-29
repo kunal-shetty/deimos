@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DEIMOS — Autonomous Coding Intelligence</title>
+  <meta name="description" content="An autonomous coding agent for your terminal — powered by Groq, with persistent multi-layer memory and structured workflow planning.">
+  <meta name="theme-color" content="#03030a">
+  <meta property="og:title" content="DEIMOS — Autonomous Coding Intelligence">
+  <meta property="og:description" content="Terminal-native coding agent. Plans, executes, remembers.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23B01828'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,700;1,9..40,300&display=swap" rel="stylesheet">
+
+  <style>
+    /* ───────────── TOKENS ───────────── */
+    :root {
+      --bg:          #03030A;
+      --surface:     #08081A;
+      --surface-2:   #0D0D22;
+      --border:      #171730;
+      --border-hi:   #252548;
+      --red:         #B01828;
+      --red-bright:  #E42C3F;
+      --red-soft:    #FF6B6B;
+      --red-dim:     #6A0F18;
+      --red-glow:    rgba(228,44,63,0.32);
+      --amber:       #B8902E;
+      --amber-dim:   #6B530D;
+      --green:       #2E6B30;
+      --green-bright:#3FA344;
+      --cyan:        #3FA3A3;
+      --text:        #E4E2EE;
+      --text-dim:    #9C9AC0;
+      --text-muted:  #55537A;
+      --mono:        'JetBrains Mono', 'Courier New', monospace;
+      --sans:        'DM Sans', -apple-system, sans-serif;
+    }
+
+    /* ───────────── RESET ───────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    ::selection { background: rgba(228,44,63,0.35); color: #fff; }
+    a { color: inherit; text-decoration: none; }
+    button { border: none; background: none; cursor: pointer; font: inherit; color: inherit; padding: 0; }
+
+    /* ───────────── SCROLL REVEAL ───────────── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+      transition-delay: var(--rd, 0s);
+    }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    /* ───────────── BOOT OVERLAY ───────────── */
+    #boot {
+      position: fixed; inset: 0; z-index: 1000;
+      background: #000004;
+      display: flex; flex-direction: column; justify-content: center;
+      padding: 48px;
+      transition: opacity 0.7s ease;
+    }
+    #boot.fade-out { opacity: 0; pointer-events: none; }
+    .boot-line {
+      font-family: var(--mono); font-size: 13px; line-height: 2.2;
+      color: #3A3858; opacity: 0; transition: opacity 0.15s;
+      white-space: nowrap; overflow: hidden;
+    }
+    .boot-line.visible { opacity: 1; }
+    .boot-ok  { color: var(--green-bright); }
+    .boot-key { color: #5A5880; }
+    .boot-val { color: #7A7898; }
+    .boot-cursor {
+      display: inline-block; width: 8px; height: 14px;
+      background: var(--text-dim); margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: blink-block 0.9s step-end infinite;
+    }
+    @keyframes blink-block { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    .boot-logo {
+      font-family: var(--mono); font-size: 11px;
+      letter-spacing: 0.35em; color: var(--text-muted); margin-bottom: 40px;
+    }
+
+    /* ───────────── MAIN ───────────── */
+    #main { opacity: 0; transition: opacity 0.8s ease; }
+    #main.visible { opacity: 1; }
+
+    /* ───────────── NAV ───────────── */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      height: 60px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 36px;
+      background: rgba(3,3,10,0.70);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.3s, background 0.3s;
+    }
+    .nav.scrolled { border-bottom-color: var(--border); background: rgba(3,3,10,0.85); }
+    .nav-id {
+      font-family: var(--mono); font-size: 13px; font-weight: 700;
+      letter-spacing: 0.22em; color: var(--text);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .nav-id .d { color: var(--red-bright); }
+    .nav-links { display: flex; align-items: center; gap: 30px; }
+    .nav-link {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-dim); letter-spacing: 0.08em;
+      transition: color 0.15s;
+    }
+    .nav-link:hover, .nav-link.active { color: var(--text); }
+    .nav-cta {
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+      padding: 8px 18px;
+      background: linear-gradient(135deg, var(--red), #7E1220);
+      color: #fff; border: 1px solid rgba(228,44,63,0.5);
+      border-radius: 999px;
+      box-shadow: 0 0 20px rgba(228,44,63,0.25);
+      transition: box-shadow 0.2s, transform 0.2s;
+    }
+    .nav-cta:hover { box-shadow: 0 0 34px var(--red-glow); transform: translateY(-1px); }
+    .nav-burger { display: none; flex-direction: column; gap: 5px; padding: 6px; }
+    .nav-burger span {
+      width: 20px; height: 1.5px; background: var(--text-dim);
+      transition: transform 0.25s, opacity 0.25s;
+    }
+    .nav-menu {
+      display: none;
+      position: fixed; top: 60px; left: 0; right: 0; z-index: 199;
+      background: rgba(3,3,10,0.96);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 24px 28px;
+      flex-direction: column; gap: 18px;
+    }
+    .nav-menu.open { display: flex; }
+    .nav-menu .nav-link { font-size: 13px; }
+    body.menu-open .nav-burger span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
+    body.menu-open .nav-burger span:nth-child(2) { opacity: 0; }
+    body.menu-open .nav-burger span:nth-child(3) { transform: translateY(-6.5px) rotate(-45deg); }
+
+    /* ───────────── HERO ───────────── */
+    .hero {
+      position: relative;
+      min-height: 100svh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 100px 36px 90px;
+      overflow: hidden;
+    }
+    .hero-grid {
+      position: absolute; inset: 0;
+      background-image:
+        linear-gradient(rgba(23,23,48,0.4) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23,23,48,0.4) 1px, transparent 1px);
+      background-size: 72px 72px;
+      mask-image: radial-gradient(ellipse 75% 75% at 50% 45%, black 25%, transparent 100%);
+      -webkit-mask-image: radial-gradient(ellipse 75% 75% at 50% 45%, black 25%, transparent 100%);
+      pointer-events: none;
+    }
+    .hero-radial {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 62% 58% at 50% 48%, rgba(176,24,40,0.075) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-beam {
+      position: absolute; top: -10%; left: 50%;
+      width: 560px; height: 900px;
+      transform: translateX(-50%);
+      background: conic-gradient(from 180deg at 50% 0%, transparent 0deg, rgba(228,44,63,0.05) 12deg, transparent 24deg, rgba(228,44,63,0.03) 40deg, transparent 55deg);
+      filter: blur(6px);
+      pointer-events: none;
+      animation: beam-sway 14s ease-in-out infinite alternate;
+    }
+    @keyframes beam-sway {
+      from { transform: translateX(-50%) rotate(-4deg); }
+      to   { transform: translateX(-50%) rotate(4deg); }
+    }
+    .hero-noise {
+      position: absolute; inset: 0; opacity: 0.018;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-repeat: repeat; background-size: 256px 256px;
+      pointer-events: none;
+    }
+    .hero-inner {
+      position: relative; z-index: 1;
+      display: flex; flex-direction: column; align-items: center; text-align: center;
+      max-width: 900px; width: 100%;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 9px;
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+      color: var(--text-dim);
+      border: 1px solid var(--border-hi);
+      background: rgba(8,8,26,0.6);
+      padding: 7px 16px; border-radius: 999px;
+      margin-bottom: 38px;
+      transition: border-color 0.2s;
+    }
+    .hero-badge:hover { border-color: var(--red-dim); }
+    .hero-badge .b-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--green-bright);
+      box-shadow: 0 0 8px var(--green-bright);
+      animation: pulse-dot 2.2s ease-in-out infinite;
+    }
+    .hero-badge .b-arr { color: var(--text-muted); }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; box-shadow: 0 0 7px var(--green-bright); }
+      50%       { opacity: 0.45; box-shadow: 0 0 14px var(--green-bright); }
+    }
+    .hero-title {
+      font-family: var(--mono);
+      font-size: clamp(38px, 7.4vw, 84px);
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      line-height: 1.04;
+      margin-bottom: 22px;
+    }
+    .hero-title .t-grad {
+      background: linear-gradient(115deg, #F0475A 0%, #B01828 45%, #6A0F18 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 0 26px rgba(228,44,63,0.30));
+    }
+    .hero-sub {
+      font-family: var(--sans);
+      font-size: clamp(15px, 2vw, 18px);
+      font-weight: 300;
+      color: var(--text-dim);
+      max-width: 560px;
+      line-height: 1.8;
+      margin-bottom: 34px;
+    }
+    .hero-sub strong { color: var(--text); font-weight: 500; }
+    .hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin-bottom: 26px; }
+    .btn-red {
+      display: inline-flex; align-items: center; gap: 9px;
+      font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em;
+      padding: 13px 30px;
+      background: linear-gradient(135deg, var(--red), #7E1220);
+      color: #fff;
+      border: 1px solid rgba(228,44,63,0.5);
+      border-radius: 999px;
+      box-shadow: 0 0 26px rgba(228,44,63,0.28);
+      transition: box-shadow 0.2s, transform 0.2s, background 0.2s;
+    }
+    .btn-red:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 44px var(--red-glow), 0 8px 30px rgba(0,0,0,0.5);
+      background: linear-gradient(135deg, var(--red-bright), #8E1524);
+    }
+    .btn-outline {
+      display: inline-flex; align-items: center; gap: 9px;
+      font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em;
+      padding: 13px 30px;
+      background: rgba(8,8,26,0.5);
+      color: var(--text-dim);
+      border: 1px solid var(--border-hi);
+      border-radius: 999px;
+      transition: border-color 0.2s, color 0.2s, background 0.2s, transform 0.2s;
+    }
+    .btn-outline:hover { border-color: var(--text-muted); color: var(--text); background: var(--surface); transform: translateY(-2px); }
+    .hero-meta {
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center;
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
+      color: var(--text-muted);
+    }
+    .hero-meta .s-sep { color: var(--border-hi); }
+    .scroll-ind {
+      position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+    }
+    .scroll-ind-txt {
+      font-family: var(--mono); font-size: 8px; letter-spacing: 0.3em;
+      color: var(--text-muted);
+    }
+    .scroll-ind-line {
+      width: 1px; height: 34px;
+      background: linear-gradient(to bottom, transparent, var(--border-hi));
+      animation: scroll-drop 1.8s ease-in-out infinite;
+    }
+    @keyframes scroll-drop {
+      0%   { transform: scaleY(0); transform-origin: top; opacity: 0; }
+      50%  { transform: scaleY(1); transform-origin: top; opacity: 1; }
+      100% { transform: scaleY(0); transform-origin: bottom; opacity: 0; }
+    }
+
+    /* ───────────── MARQUEE ───────────── */
+    .marquee {
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 0;
+      overflow: hidden;
+      position: relative;
+      background: rgba(8,8,26,0.35);
+      -webkit-mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
+      mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
+    }
+    .marquee-track {
+      display: flex; gap: 56px; width: max-content;
+      animation: marquee-scroll 30s linear infinite;
+    }
+    .marquee:hover .marquee-track { animation-play-state: paused; }
+    @keyframes marquee-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    .marquee-item {
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
+      color: var(--text-muted);
+      display: flex; align-items: center; gap: 56px;
+      white-space: nowrap;
+    }
+    .marquee-item::after { content: '◆'; font-size: 7px; color: var(--red-dim); }
+
+    /* ───────────── SECTIONS SHARED ───────────── */
+    .section { padding: 96px 0; border-top: 1px solid var(--border); }
+    .container { max-width: 880px; margin: 0 auto; padding: 0 36px; }
+    .eyebrow {
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.3em;
+      color: var(--amber); opacity: 0.8; margin-bottom: 10px;
+    }
+    .sec-title {
+      font-family: var(--mono); font-size: 24px; font-weight: 600;
+      color: var(--text); margin-bottom: 16px;
+    }
+    .sec-sub {
+      font-size: 15px; font-weight: 300; color: var(--text-dim);
+      max-width: 560px; margin-bottom: 44px;
+    }
+
+    /* ───────────── STATS ───────────── */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      border: 1px solid var(--border); border-radius: 16px;
+      background: linear-gradient(180deg, rgba(8,8,26,0.9), rgba(3,3,10,0.9));
+      overflow: hidden;
+    }
+    .stat {
+      padding: 34px 24px 30px; text-align: center;
+      border-right: 1px solid var(--border);
+      position: relative;
+    }
+    .stat:last-child { border-right: none; }
+    .stat::before {
+      content: ''; position: absolute; top: 0; left: 20%; right: 20%; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(228,44,63,0.4), transparent);
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .stat:hover::before { opacity: 1; }
+    .stat-num {
+      font-family: var(--mono); font-size: 32px; font-weight: 700;
+      color: var(--text); line-height: 1.1; margin-bottom: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-num .u { font-size: 15px; color: var(--red-bright); margin-left: 2px; }
+    .stat-lbl {
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em;
+      color: var(--text-muted);
+    }
+    /* ───────────── OVERVIEW / DOSSIER ───────────── */
+    .dossier-grid {
+      display: grid; grid-template-columns: 240px 1fr;
+      border: 1px solid var(--border); border-radius: 16px;
+      background: linear-gradient(180deg, rgba(8,8,26,0.85), rgba(3,3,10,0.85));
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    }
+    .dossier-meta {
+      border-right: 1px solid var(--border);
+      padding: 32px 26px;
+      display: flex; flex-direction: column; gap: 24px;
+      background: rgba(3,3,10,0.5);
+    }
+    .meta-key {
+      font-family: var(--mono); font-size: 8px; letter-spacing: 0.24em;
+      color: var(--text-muted); margin-bottom: 5px;
+    }
+    .meta-val {
+      font-family: var(--mono); font-size: 11.5px;
+      color: var(--text-dim); line-height: 1.55;
+    }
+    .meta-val.active { color: var(--green-bright); }
+    .dossier-body {
+      padding: 36px 40px;
+      display: flex; flex-direction: column; justify-content: center;
+      position: relative;
+    }
+    .dossier-body::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(ellipse 80% 60% at 80% 20%, rgba(176,24,40,0.05), transparent 70%);
+      pointer-events: none;
+    }
+    .dossier-text {
+      font-size: 15.5px; font-weight: 300; color: var(--text-dim);
+      line-height: 1.85; max-width: 540px;
+      position: relative;
+    }
+    .dossier-text + .dossier-text { margin-top: 18px; }
+    .dossier-text strong { color: var(--text); font-weight: 500; }
+    .dossier-text em { color: var(--red-soft); font-style: normal; }
+
+    /* ───────────── BENTO / CAPABILITIES ───────────── */
+    .bento-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 14px;
+    }
+    .bento-card {
+      --sx: 50%; --sy: 50%;
+      grid-column: span 2;
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background:
+        radial-gradient(420px circle at var(--sx) var(--sy), rgba(228,44,63,0.06), transparent 55%),
+        linear-gradient(180deg, rgba(13,13,34,0.9), rgba(5,5,16,0.95));
+      padding: 28px 26px 26px;
+      overflow: hidden;
+      transition: border-color 0.3s, transform 0.3s cubic-bezier(0.22,1,0.36,1), box-shadow 0.3s;
+    }
+    .bento-card:hover {
+      border-color: rgba(228,44,63,0.35);
+      transform: translateY(-4px);
+      box-shadow: 0 18px 44px rgba(0,0,0,0.5), 0 0 40px rgba(228,44,63,0.06);
+    }
+    .bento-card.span-4 { grid-column: span 4; }
+    .bento-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .bento-code {
+      font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.22em;
+      color: var(--text-muted);
+    }
+    .bento-icon {
+      width: 40px; height: 40px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border-hi); border-radius: 11px;
+      background: rgba(3,3,10,0.7);
+      color: var(--red-soft);
+      transition: border-color 0.3s, box-shadow 0.3s;
+    }
+    .bento-card:hover .bento-icon {
+      border-color: rgba(228,44,63,0.4);
+      box-shadow: 0 0 18px rgba(228,44,63,0.18);
+    }
+    .bento-name {
+      font-family: var(--mono); font-size: 14.5px; font-weight: 600;
+      color: var(--text); margin-bottom: 10px;
+    }
+    .bento-desc {
+      font-size: 13.5px; font-weight: 300; color: var(--text-dim); line-height: 1.75;
+    }
+    .bento-desc code {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--red-soft);
+      background: rgba(228,44,63,0.09);
+      border: 1px solid rgba(228,44,63,0.15);
+      padding: 1px 6px; border-radius: 5px;
+    }
+    .bento-rule {
+      width: 22px; height: 2px; border-radius: 2px;
+      background: linear-gradient(90deg, var(--red-bright), transparent);
+      margin-top: 18px; opacity: 0.7;
+    }
+    /* card-specific flourishes */
+    .bento-mem-layers {
+      display: flex; gap: 8px; margin-top: 20px;
+    }
+    .bento-mem-layer {
+      flex: 1;
+      font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.14em;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 6px; text-align: center;
+      background: rgba(3,3,10,0.6);
+      transition: color 0.25s, border-color 0.25s, background 0.25s;
+    }
+    .bento-card:hover .bento-mem-layer { color: var(--text-dim); border-color: var(--border-hi); }
+    .bento-card:hover .bento-mem-layer:nth-child(1) { border-color: rgba(228,44,63,0.35); color: var(--red-soft); transition-delay: 0s; }
+    .bento-card:hover .bento-mem-layer:nth-child(2) { border-color: rgba(184,144,46,0.35); color: var(--amber); transition-delay: 0.08s; }
+    .bento-card:hover .bento-mem-layer:nth-child(3) { border-color: rgba(63,163,67,0.35); color: var(--green-bright); transition-delay: 0.16s; }
+    .bento-dag {
+      margin-top: 20px;
+      font-family: var(--mono); font-size: 10.5px; line-height: 1.9;
+      color: var(--text-muted);
+      background: rgba(3,3,10,0.6);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .bento-dag .dg-ok { color: var(--green-bright); }
+    .bento-dag .dg-run { color: var(--amber); }
+    .bento-dag .dg-wait { color: var(--text-muted); }
+    .bento-dag .dg-node { color: var(--red-soft); }
+    .bento-webchips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .bento-chip {
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 12px;
+      background: rgba(3,3,10,0.6);
+      transition: border-color 0.25s, color 0.25s;
+    }
+    .bento-card:hover .bento-chip { border-color: var(--border-hi); color: var(--text-dim); }
+    .bento-card:hover .bento-chip:first-child { border-color: rgba(228,44,63,0.35); color: var(--red-soft); }
+    /* ───────────── LIVE SESSION / TERMINAL DEMO ───────────── */
+    .session-grid {
+      display: grid; grid-template-columns: 1.25fr 1fr; gap: 14px;
+      align-items: stretch;
+    }
+    .term-shell {
+      border: 1px solid var(--border); border-radius: 16px;
+      background: linear-gradient(180deg, rgba(13,13,34,0.95), rgba(5,5,16,0.98));
+      overflow: hidden;
+      box-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 0 60px rgba(228,44,63,0.05);
+    }
+    .term-bar {
+      display: flex; align-items: center; gap: 7px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(3,3,10,0.6);
+    }
+    .td { width: 10px; height: 10px; border-radius: 50%; }
+    .td-r { background: #FF5F57; }
+    .td-y { background: #FEBC2E; }
+    .td-g { background: #28C840; }
+    .term-ttl {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-muted); margin-left: auto; letter-spacing: 0.06em;
+    }
+    .term-replay {
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+      color: var(--text-muted);
+      border: 1px solid var(--border-hi); border-radius: 6px;
+      padding: 4px 10px; margin-left: 12px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .term-replay:hover { color: var(--text-dim); border-color: var(--text-muted); }
+    .term-body {
+      padding: 22px 26px 26px;
+      min-height: 300px;
+      font-family: var(--mono); font-size: 12.5px; line-height: 2.05;
+    }
+    .term-cursor {
+      display: inline-block; width: 8px; height: 14px;
+      background: var(--red-bright);
+      vertical-align: text-bottom; margin-left: 2px;
+      animation: blink-block 0.9s step-end infinite;
+    }
+    .session-side { display: flex; flex-direction: column; gap: 14px; }
+    .slog-card {
+      flex: 1;
+      border: 1px solid var(--border); border-radius: 16px;
+      background: linear-gradient(180deg, rgba(13,13,34,0.9), rgba(5,5,16,0.95));
+      padding: 22px 24px;
+    }
+    .slog-title {
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.24em;
+      color: var(--text-muted); margin-bottom: 14px;
+    }
+    .slog-list { list-style: none; }
+    .slog-list li {
+      font-family: var(--mono); font-size: 11px; line-height: 2.1;
+      color: var(--text-muted);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .slog-ico { width: 14px; text-align: center; flex-shrink: 0; }
+    .slog-ok  { color: var(--green-bright); }
+    .slog-run { color: var(--amber); }
+    .slog-wait{ color: var(--text-muted); opacity: 0.5; }
+    .slog-txt-ok  { color: var(--text-dim); }
+    .slog-txt-run { color: var(--text-dim); }
+    .slog-txt-wait{ color: var(--text-muted); opacity: 0.6; }
+    .tok-meter { margin-bottom: 12px; }
+    .tok-row {
+      display: flex; justify-content: space-between;
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+      color: var(--text-dim); margin-bottom: 7px;
+    }
+    .tok-row .tv-num { font-variant-numeric: tabular-nums; color: var(--text); }
+    .tok-bar {
+      height: 5px; border-radius: 99px;
+      background: rgba(23,23,48,0.8);
+      overflow: hidden;
+    }
+    .tok-fill {
+      height: 100%; width: 0%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--red), var(--red-bright));
+      box-shadow: 0 0 10px rgba(228,44,63,0.4);
+      transition: width 0.6s cubic-bezier(0.22,1,0.36,1);
+    }
+
+    /* ───────────── WORKFLOW ───────────── */
+    .wf-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+    }
+    .wf-card {
+      --sx: 50%; --sy: 50%;
+      position: relative;
+      border: 1px solid var(--border); border-radius: 16px;
+      background:
+        radial-gradient(300px circle at var(--sx) var(--sy), rgba(228,44,63,0.05), transparent 60%),
+        linear-gradient(180deg, rgba(13,13,34,0.85), rgba(5,5,16,0.95));
+      padding: 26px 22px 24px;
+      transition: border-color 0.3s, transform 0.3s;
+    }
+    .wf-card:hover { border-color: rgba(228,44,63,0.3); transform: translateY(-3px); }
+    .wf-step {
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em;
+      color: var(--red-bright); opacity: 0.85; margin-bottom: 14px;
+    }
+    .wf-name {
+      font-family: var(--mono); font-size: 13.5px; font-weight: 600;
+      color: var(--text); margin-bottom: 9px;
+    }
+    .wf-desc {
+      font-size: 12.5px; font-weight: 300; color: var(--text-dim); line-height: 1.75;
+    }
+    .wf-arrow {
+      position: absolute; right: -15px; top: 50%; transform: translateY(-50%);
+      font-family: var(--mono); font-size: 13px; color: var(--border-hi);
+      z-index: 1;
+    }
+
+    /* ───────────── FAQ ───────────── */
+    .faq-list { border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+    .faq-item + .faq-item { border-top: 1px solid var(--border); }
+    .faq-q {
+      width: 100%;
+      display: flex; align-items: center; justify-content: space-between; gap: 18px;
+      padding: 20px 26px;
+      text-align: left;
+      font-family: var(--mono); font-size: 13px; font-weight: 500;
+      color: var(--text-dim);
+      transition: color 0.15s, background 0.15s;
+    }
+    .faq-q:hover { color: var(--text); background: rgba(8,8,26,0.6); }
+    .faq-ico {
+      font-family: var(--mono); font-size: 15px; color: var(--text-muted);
+      transition: transform 0.3s, color 0.3s;
+      flex-shrink: 0;
+    }
+    .faq-item.open .faq-ico { transform: rotate(45deg); color: var(--red-bright); }
+    .faq-a {
+      max-height: 0; overflow: hidden;
+      transition: max-height 0.4s cubic-bezier(0.22,1,0.36,1);
+    }
+    .faq-a-inner {
+      padding: 0 26px 22px;
+      font-size: 13.5px; font-weight: 300; color: var(--text-dim); line-height: 1.8;
+      max-width: 640px;
+    }
+    .faq-a-inner code {
+      font-family: var(--mono); font-size: 11.5px;
+      color: var(--red-soft);
+      background: rgba(228,44,63,0.09);
+      padding: 1px 6px; border-radius: 5px;
+    }
+
+    /* ───────────── FINAL CTA ───────────── */
+    .cta-banner {
+      position: relative;
+      border: 1px solid rgba(228,44,63,0.25); border-radius: 24px;
+      background:
+        radial-gradient(ellipse 70% 90% at 50% 115%, rgba(176,24,40,0.16), transparent 65%),
+        linear-gradient(180deg, rgba(13,13,34,0.9), rgba(5,5,16,0.95));
+      padding: 72px 40px;
+      text-align: center;
+      overflow: hidden;
+    }
+    .cta-banner::before {
+      content: ''; position: absolute; inset: 0;
+      background-image:
+        linear-gradient(rgba(23,23,48,0.35) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23,23,48,0.35) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse 70% 80% at 50% 100%, black 20%, transparent 90%);
+      -webkit-mask-image: radial-gradient(ellipse 70% 80% at 50% 100%, black 20%, transparent 90%);
+      pointer-events: none;
+    }
+    .cta-inner { position: relative; }
+    .cta-title {
+      font-family: var(--mono); font-size: clamp(20px, 3.4vw, 30px); font-weight: 700;
+      color: var(--text); margin-bottom: 14px;
+    }
+    .cta-title .t-grad {
+      background: linear-gradient(115deg, #F0475A, #B01828 60%, #6A0F18);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .cta-sub {
+      font-size: 15px; font-weight: 300; color: var(--text-dim);
+      max-width: 480px; margin: 0 auto 34px;
+    }
+
+    /* ───────────── FOOTER ───────────── */
+    .footer { padding: 52px 0 40px; border-top: 1px solid var(--border); }
+    .footer-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 34px;
+    }
+    .footer-brand { font-family: var(--mono); font-size: 11px; letter-spacing: 0.2em; color: var(--text); }
+    .footer-brand .d { color: var(--red-bright); }
+    .footer-tag { font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em; color: var(--text-muted); margin-top: 6px; }
+    .footer-links { display: flex; gap: 30px; }
+    .footer-lnk {
+      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+      letter-spacing: 0.08em; transition: color 0.15s;
+    }
+    .footer-lnk:hover { color: var(--text-dim); }
+    .footer-base {
+      border-top: 1px solid var(--border); padding-top: 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em;
+      color: var(--text-muted);
+    }
+    .footer-status { display: flex; align-items: center; gap: 8px; }
+    .footer-status .s-dot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--green-bright); box-shadow: 0 0 7px var(--green-bright);
+      animation: pulse-dot 2.2s ease-in-out infinite;
+    }
+
+    /* ───────────── ARCHITECTURE BOARD ───────────── */
+    .arch-board {
+      background: linear-gradient(180deg, rgba(13,13,34,0.9), rgba(5,5,16,0.95));
+      border: 1px solid var(--border); border-radius: 16px;
+      padding: 38px 32px;
+    }
+    .arch-row { display: grid; gap: 12px; }
+    .arch-row.cols-1 { grid-template-columns: 1fr; max-width: 300px; margin: 0 auto; }
+    .arch-row.cols-3 { grid-template-columns: repeat(3, 1fr); }
+    .arch-connector {
+      display: flex; justify-content: center; padding: 4px 0;
+      font-family: var(--mono); font-size: 13px; color: var(--border-hi);
+    }
+    .arch-box {
+      border: 1px solid var(--border-hi); border-radius: 12px;
+      padding: 16px 18px;
+      background: rgba(3,3,10,0.5);
+      transition: border-color 0.25s, transform 0.25s;
+    }
+    .arch-box:hover { border-color: rgba(228,44,63,0.3); transform: translateY(-2px); }
+    .arch-box.core {
+      border-color: var(--red-dim);
+      background: rgba(176,24,40,0.05);
+      text-align: center;
+    }
+    .arch-box.core .a-name { color: var(--red-bright); }
+    .a-lbl {
+      font-family: var(--mono); font-size: 8px; letter-spacing: 0.24em;
+      color: var(--text-muted); margin-bottom: 5px;
+    }
+    .a-name {
+      font-family: var(--mono); font-size: 12px;
+      color: var(--text); margin-bottom: 9px;
+    }
+    .a-items {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-muted); line-height: 1.85;
+    }
+
+    /* ───────────── INSTALL TERMINAL ───────────── */
+    .tabs { display: flex; margin-bottom: -1px; position: relative; z-index: 1; }
+    .tab {
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+      padding: 9px 22px;
+      border: 1px solid var(--border);
+      border-top-left-radius: 9px; border-top-right-radius: 9px;
+      color: var(--text-muted); background: var(--bg);
+      transition: color 0.15s, background 0.15s;
+    }
+    .tab.active {
+      color: var(--text); background: var(--surface);
+      border-bottom-color: var(--surface);
+    }
+    .terminal {
+      border: 1px solid var(--border); border-radius: 0 14px 14px 14px;
+      background: linear-gradient(180deg, rgba(13,13,34,0.95), rgba(5,5,16,0.98));
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    }
+    .term-body2 { padding: 24px 28px 28px; }
+    .tc { display: none; }
+    .tc.active { display: block; }
+    .tl {
+      font-family: var(--mono); font-size: 12.5px; line-height: 2.15;
+      color: var(--text-dim);
+      display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    }
+    .tp  { color: var(--red-bright); user-select: none; flex-shrink: 0; }
+    .tc2 { color: var(--text-muted); }
+    .tk  { color: var(--amber); }
+    .tv  { color: var(--text-dim); opacity: 0.75; }
+    .copy-btn {
+      margin-top: 22px;
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.14em;
+      padding: 8px 18px;
+      border: 1px solid var(--border-hi); border-radius: 999px;
+      color: var(--text-muted);
+      transition: color 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .copy-btn:hover { border-color: var(--text-muted); color: var(--text); }
+
+    /* ───────────── DOCS ───────────── */
+    .docs-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    }
+    .doc-card {
+      position: relative;
+      border: 1px solid var(--border); border-radius: 14px;
+      background: linear-gradient(180deg, rgba(13,13,34,0.85), rgba(5,5,16,0.95));
+      padding: 24px 26px 30px;
+      transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+    }
+    .doc-card:hover {
+      border-color: rgba(228,44,63,0.3);
+      transform: translateY(-3px);
+      box-shadow: 0 14px 36px rgba(0,0,0,0.45);
+    }
+    .doc-id {
+      font-family: var(--mono); font-size: 8px; letter-spacing: 0.24em;
+      color: var(--amber-dim); margin-bottom: 10px;
+    }
+    .doc-name {
+      font-family: var(--mono); font-size: 13.5px; font-weight: 600;
+      color: var(--text); margin-bottom: 7px;
+    }
+    .doc-desc { font-size: 12.5px; color: var(--text-muted); font-weight: 300; max-width: 300px; }
+    .doc-arr {
+      position: absolute; bottom: 24px; right: 24px;
+      font-family: var(--mono); font-size: 14px; color: var(--text-muted);
+      transition: color 0.15s, transform 0.15s;
+    }
+    .doc-card:hover .doc-arr { color: var(--red-soft); transform: translate(2px, -2px); }
+
+    /* ───────────── TERMINAL DEMO LINES ───────────── */
+    .d-c2  { color: var(--text-muted); }
+    .d-p   { color: var(--red-bright); user-select: none; }
+    .d-dim { color: var(--text-muted); }
+    .d-t   { color: var(--text-dim); }
+    .d-ok  { color: var(--green-bright); }
+    .d-run { color: var(--amber); }
+
+    /* ───────────── RESPONSIVE ───────────── */
+    @media (max-width: 920px) {
+      .session-grid { grid-template-columns: 1fr; }
+      .wf-grid { grid-template-columns: repeat(2, 1fr); }
+      .wf-arrow { display: none; }
+    }
+    @media (max-width: 700px) {
+      .nav { padding: 0 20px; height: 56px; }
+      .nav-links .nav-link, .nav-links .nav-cta { display: none; }
+      .nav-burger { display: flex; }
+      .nav-menu { top: 56px; }
+      .hero { padding: 90px 20px 70px; }
+      .container { padding: 0 20px; }
+      .section { padding: 64px 0; }
+      .dossier-grid { grid-template-columns: 1fr; }
+      .dossier-meta {
+        border-right: none; border-bottom: 1px solid var(--border);
+        flex-direction: row; flex-wrap: wrap; gap: 18px 28px;
+      }
+      .bento-grid { grid-template-columns: 1fr 1fr; }
+      .bento-card, .bento-card.span-4 { grid-column: span 2; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+      .stat:nth-child(2) { border-right: none; }
+      .stat:nth-child(1), .stat:nth-child(2) { border-bottom: 1px solid var(--border); }
+      .wf-grid { grid-template-columns: 1fr; }
+      .footer-inner { flex-direction: column; gap: 24px; text-align: center; }
+      .footer-base { flex-direction: column; gap: 12px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .marquee-track, .hero-beam, .term-cursor, .boot-cursor,
+      .hero-badge .b-dot, .footer-status .s-dot, .scroll-ind-line { animation: none !important; }
+      .reveal { opacity: 1; transform: none; transition: none; }
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══════════════════ BOOT OVERLAY -->
+  <div id="boot">
+    <div class="boot-logo">DEIMOS // SECURE CHANNEL</div>
+    <div class="boot-line" id="bl0"></div>
+    <div class="boot-line" id="bl1"></div>
+    <div class="boot-line" id="bl2"></div>
+    <div class="boot-line" id="bl3"></div>
+    <div class="boot-line" id="bl4"></div>
+    <div class="boot-line" id="bl5"></div>
+    <div class="boot-line" id="bl6"><span class="boot-cursor"></span></div>
+  </div>
+
+  <!-- ═══════════════════ MAIN -->
+  <div id="main">
+
+    <!-- NAV -->
+    <nav class="nav" id="nav">
+      <span class="nav-id"><span class="d">D</span>EIMOS</span>
+      <div class="nav-links">
+        <a class="nav-link" href="#capabilities">CAPABILITIES</a>
+        <a class="nav-link" href="#internals">INTERNALS</a>
+        <a class="nav-link" href="#session">LIVE SESSION</a>
+        <a class="nav-link" href="#install">DEPLOY</a>
+        <a class="nav-cta" href="https://github.com/kunal-shetty/deimos" target="_blank" rel="noopener">GITHUB ↗</a>
+      </div>
+      <button class="nav-burger" id="burger" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
+    </nav>
+    <div class="nav-menu" id="nav-menu">
+      <a class="nav-link" href="#capabilities">CAPABILITIES</a>
+      <a class="nav-link" href="#internals">INTERNALS</a>
+      <a class="nav-link" href="#session">LIVE SESSION</a>
+      <a class="nav-link" href="#install">DEPLOY</a>
+      <a class="nav-link" href="https://github.com/kunal-shetty/deimos" target="_blank" rel="noopener">GITHUB ↗</a>
+    </div>
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-grid"></div>
+      <div class="hero-radial"></div>
+      <div class="hero-beam"></div>
+      <div class="hero-noise"></div>
+      <div class="hero-inner">
+        <a class="hero-badge" href="#internals">
+          <span class="b-dot"></span>
+          <span>SYSTEM ACTIVE — LLAMA-3.3-70B ON GROQ</span>
+          <span class="b-arr">→</span>
+        </a>
+        <h1 class="hero-title">MEET <span class="t-grad">DEIMOS</span></h1>
+        <p class="hero-sub">Autonomous coding intelligence for your terminal. It <strong>plans</strong> before it writes, <strong>executes</strong> with precision, and <strong>remembers</strong> everything between sessions.</p>
+        <div class="hero-ctas">
+          <a class="btn-red" href="#install">⌘ Quick Install</a>
+          <a class="btn-outline" href="https://github.com/kunal-shetty/deimos/blob/main/docs/architecture.md" target="_blank" rel="noopener">Read Architecture ↗</a>
+        </div>
+        <div class="hero-meta">
+          <span>MULTI-LAYER MEMORY</span>
+          <span class="s-sep">|</span>
+          <span>DAG PLANNING</span>
+          <span class="s-sep">|</span>
+          <span>WEB-AWARE</span>
+        </div>
+      </div>
+      <div class="scroll-ind">
+        <span class="scroll-ind-txt">SCROLL</span>
+        <div class="scroll-ind-line"></div>
+      </div>
+    </section>
+
+    <!-- MARQUEE -->
+    <div class="marquee">
+      <div class="marquee-track" id="marquee-track">
+        <span class="marquee-item">SEMANTIC MEMORY</span>
+        <span class="marquee-item">EPISODIC MEMORY</span>
+        <span class="marquee-item">PROJECT CONTEXT</span>
+        <span class="marquee-item">DAG WORKFLOW</span>
+        <span class="marquee-item">CLARIFICATION ENGINE</span>
+        <span class="marquee-item">TAVILY WEB SEARCH</span>
+        <span class="marquee-item">GIT LIFECYCLE</span>
+        <span class="marquee-item">FASTAPI DASHBOARD</span>
+      </div>
+    </div>
+    <!-- STATS -->
+    <section class="section" id="stats">
+      <div class="container">
+        <div class="stats-grid reveal">
+          <div class="stat">
+            <div class="stat-num"><span data-count="3">0</span><span class="u">×</span></div>
+            <div class="stat-lbl">MEMORY LAYERS</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num"><span data-count="10">0</span><span class="u">+</span></div>
+            <div class="stat-lbl">NATIVE TOOLS</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num"><span data-count="70">0</span><span class="u">B</span></div>
+            <div class="stat-lbl">PARAM BACKBONE</div>
+          </div>
+          <div class="stat">
+            <div class="stat-num"><span data-count="100">0</span><span class="u">%</span></div>
+            <div class="stat-lbl">TERMINAL NATIVE</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- OVERVIEW / DOSSIER -->
+    <section class="section" id="overview">
+      <div class="container">
+        <div class="eyebrow reveal">DOSSIER</div>
+        <div class="sec-title reveal" style="--rd:0.05s">Intelligence file</div>
+        <p class="sec-sub reveal" style="--rd:0.1s">A terminal-native agent that does not simply respond — it reasons, asks, plans, and ships.</p>
+        <div class="dossier-grid reveal" style="--rd:0.15s">
+          <div class="dossier-meta">
+            <div class="meta-item">
+              <div class="meta-key">DESIGNATION</div>
+              <div class="meta-val">DEIMOS</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-key">CLASSIFICATION</div>
+              <div class="meta-val">AUTONOMOUS AGENT</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-key">BACKBONE LLM</div>
+              <div class="meta-val">GROQ<br>LLAMA-3.3-70B</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-key">MEMORY STORE</div>
+              <div class="meta-val">SUPABASE<br>PGVECTOR</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-key">INTERFACE</div>
+              <div class="meta-val">TERMINAL<br>WEB DASHBOARD</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-key">STATUS</div>
+              <div class="meta-val active">● OPERATIONAL</div>
+            </div>
+          </div>
+          <div class="dossier-body">
+            <p class="dossier-text">Deimos is a terminal-native coding agent that does not simply respond — it <strong>reasons</strong>. Given a task, it forms a dependency-aware plan before writing a single line, asks clarifying questions to resolve ambiguity, and executes step by step with precise tool use.</p>
+            <p class="dossier-text">Between sessions, it retains what it learned: your codebase structure, your patterns, the decisions already made. Named for the moon of Mars — <em>the embodiment of dread and precision</em> — it moves in silence and acts without hesitation.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CAPABILITIES / BENTO -->
+    <section class="section" id="capabilities">
+      <div class="container">
+        <div class="eyebrow reveal">CAPABILITIES</div>
+        <div class="sec-title reveal" style="--rd:0.05s">What Deimos can do</div>
+        <p class="sec-sub reveal" style="--rd:0.1s">Six integrated systems, one agent loop. Hover to inspect.</p>
+        <div class="bento-grid">
+
+          <div class="bento-card span-4 reveal">
+            <div class="bento-head">
+              <span class="bento-code">CAP-MEM-001</span>
+              <span class="bento-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4c0 .74-.2 1.43-.55 2.03A4.5 4.5 0 0 1 18 12.5c0 .9-.26 1.73-.72 2.44A4.5 4.5 0 0 1 15 22h-3a4.5 4.5 0 0 1-2.28-7.06A4.5 4.5 0 0 1 9 6.03 4 4 0 0 1 12 2z"/><path d="M12 2v20"/></svg>
+              </span>
+            </div>
+            <div class="bento-name">Multi-Layer Memory</div>
+            <div class="bento-desc">Persistent knowledge via Supabase + pgvector. Deimos recalls codebase structure, patterns, and past decisions — and carries them forward without being told.</div>
+            <div class="bento-mem-layers">
+              <span class="bento-mem-layer">SEMANTIC</span>
+              <span class="bento-mem-layer">EPISODIC</span>
+              <span class="bento-mem-layer">PROJECT</span>
+            </div>
+          </div>
+
+          <div class="bento-card span-2 reveal" style="--rd:0.08s">
+            <div class="bento-head">
+              <span class="bento-code">CAP-PLN-002</span>
+              <span class="bento-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="4" r="2.2"/><circle cx="18" cy="4" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="5" cy="20" r="2.2"/><circle cx="19" cy="20" r="2.2"/><path d="M6 6.2 10.6 10M18 6.2 13.4 10M10.6 14 6 18M13.4 14 18 18"/></svg>
+              </span>
+            </div>
+            <div class="bento-name">DAG Workflow Planning</div>
+            <div class="bento-desc">A dependency-aware task graph before touching a single file — order resolved, blind rewrites minimized.</div>
+            <div class="bento-dag"><span class="dg-node">[t1]</span> parse spec      <span class="dg-ok">✓</span>
+<span class="dg-node">[t2]</span> plan schema    <span class="dg-ok">✓</span>
+<span class="dg-node">[t3]</span> implement      <span class="dg-run">●</span>
+<span class="dg-node">[t4]</span> run tests      <span class="dg-wait">○</span></div>
+          </div>
+
+          <div class="bento-card span-2 reveal">
+            <div class="bento-head">
+              <span class="bento-code">CAP-IVQ-003</span>
+              <span class="bento-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/><path d="M9.5 9.5a2.5 2.5 0 0 1 4.86.83c0 1.67-2.36 2.17-2.36 3.67"/><path d="M12 17h.01"/></svg>
+              </span>
+            </div>
+            <div class="bento-name">Interactive Clarification</div>
+            <div class="bento-desc">Ambiguity is the enemy of precision. Deimos surfaces the questions that matter <em>before</em> execution — it asks once, not mid-change.</div>
+            <div class="bento-rule"></div>
+          </div>
+
+          <div class="bento-card span-2 reveal" style="--rd:0.08s">
+            <div class="bento-head">
+              <span class="bento-code">CAP-WEB-004</span>
+              <span class="bento-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+              </span>
+            </div>
+            <div class="bento-name">Web &amp; Doc Integration</div>
+            <div class="bento-desc">Real-time search and doc extraction via Tavily. Unknown API? Shifting spec? It reaches out, reads, and integrates.</div>
+            <div class="bento-webchips">
+              <span class="bento-chip">search</span>
+              <span class="bento-chip">extract</span>
+              <span class="bento-chip">integrate</span>
+            </div>
+          </div>
+
+          <div class="bento-card span-2 reveal" style="--rd:0.16s">
+            <div class="bento-head">
+              <span class="bento-code">CAP-GIT-005</span>
+              <span class="bento-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7"/><path d="M15.5 8.5c0 4-4.5 4-7.5 5.5"/></svg>
+              </span>
+            </div>
+            <div class="bento-name">Full Git Lifecycle</div>
+            <div class="bento-desc">Stage, commit, branch, and manage GitHub PRs natively in the loop — with commit messages and PR descriptions it drafts itself.</div>
+            <div class="bento-rule"></div>
+          </div>
+
+          <div class="bento-card span-4 reveal" style="--rd:0.24s">
+            <div class="bento-head">
+              <span class="bento-code">CAP-DSH-006</span>
+              <span class="bento-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 7h4M6 11h7"/></svg>
+              </span>
+            </div>
+            <div class="bento-name">Real-time Dashboard</div>
+            <div class="bento-desc">A FastAPI-powered web UI exposing the agent's internal state — current task, memory contents, tool calls in flight, live logs. Run <code>deimos dashboard</code> and watch the intelligence work.</div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+    <!-- ARCHITECTURE -->
+    <section class="section" id="internals">
+      <div class="container">
+        <div class="eyebrow reveal">INTERNALS</div>
+        <div class="sec-title reveal" style="--rd:0.05s">How it's built</div>
+        <p class="sec-sub reveal" style="--rd:0.1s">A modular pipeline: plan first, act second, remember always.</p>
+        <div class="arch-board reveal" style="--rd:0.15s">
+          <div class="arch-row cols-1">
+            <div class="arch-box core">
+              <div class="a-lbl">CORE ENGINE</div>
+              <div class="a-name">deimos.core</div>
+              <div class="a-items">Agent loop · Task executor · Context manager · Clarification engine</div>
+            </div>
+          </div>
+          <div class="arch-connector">│</div>
+          <div class="arch-row cols-3">
+            <div class="arch-box">
+              <div class="a-lbl">PLANNER</div>
+              <div class="a-name">agent.planner</div>
+              <div class="a-items">DAG construction<br>Dependency resolution<br>Workflow engine</div>
+            </div>
+            <div class="arch-box">
+              <div class="a-lbl">MEMORY</div>
+              <div class="a-name">memory.*</div>
+              <div class="a-items">Semantic layer<br>Episodic layer<br>Project layer</div>
+            </div>
+            <div class="arch-box">
+              <div class="a-lbl">TOOLS</div>
+              <div class="a-name">tools.*</div>
+              <div class="a-items">File system ops<br>Web search (Tavily)<br>Git lifecycle</div>
+            </div>
+          </div>
+          <div class="arch-connector">│</div>
+          <div class="arch-row cols-3">
+            <div class="arch-box">
+              <div class="a-lbl">INFERENCE</div>
+              <div class="a-name">Groq API</div>
+              <div class="a-items">llama-3.3-70b<br>Low-latency calls</div>
+            </div>
+            <div class="arch-box">
+              <div class="a-lbl">PERSISTENCE</div>
+              <div class="a-name">Supabase</div>
+              <div class="a-items">PostgreSQL<br>pgvector embeddings</div>
+            </div>
+            <div class="arch-box">
+              <div class="a-lbl">INTERFACE</div>
+              <div class="a-name">web/ + ui/</div>
+              <div class="a-items">FastAPI dashboard<br>prompt_toolkit CLI</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LIVE SESSION -->
+    <section class="section" id="session">
+      <div class="container">
+        <div class="eyebrow reveal">LIVE SESSION</div>
+        <div class="sec-title reveal" style="--rd:0.05s">Watch it think</div>
+        <p class="sec-sub reveal" style="--rd:0.1s">A simulated session, exactly as it renders in your terminal.</p>
+        <div class="session-grid">
+          <div class="term-shell reveal" style="--rd:0.15s">
+            <div class="term-bar">
+              <div class="td td-r"></div><div class="td td-y"></div><div class="td td-g"></div>
+              <span class="term-ttl">deimos — session #0142</span>
+              <button class="term-replay" id="term-replay" type="button">↻ REPLAY</button>
+            </div>
+            <div class="term-body" id="term-body"></div>
+          </div>
+          <div class="session-side">
+            <div class="slog-card reveal" style="--rd:0.2s">
+              <div class="slog-title">EXECUTION LOG</div>
+              <ul class="slog-list" id="slog-list">
+                <li data-slog="0"><span class="slog-ico slog-wait">○</span><span class="slog-txt slog-txt-wait">Clarify intent</span></li>
+                <li data-slog="1"><span class="slog-ico slog-wait">○</span><span class="slog-txt slog-txt-wait">Construct task DAG</span></li>
+                <li data-slog="2"><span class="slog-ico slog-wait">○</span><span class="slog-txt slog-txt-wait">Resolve dependencies</span></li>
+                <li data-slog="3"><span class="slog-ico slog-wait">○</span><span class="slog-txt slog-txt-wait">Execute step 1/4</span></li>
+                <li data-slog="4"><span class="slog-ico slog-wait">○</span><span class="slog-txt slog-txt-wait">Recall project memory</span></li>
+                <li data-slog="5"><span class="slog-ico slog-wait">○</span><span class="slog-txt slog-txt-wait">Run test suite</span></li>
+              </ul>
+            </div>
+            <div class="slog-card reveal" style="--rd:0.25s">
+              <div class="slog-title">CONTEXT WINDOW</div>
+              <div class="tok-meter">
+                <div class="tok-row"><span>MEMORY RECALL</span><span class="tv-num" id="tok-mem">0%</span></div>
+                <div class="tok-bar"><div class="tok-fill" id="tok-mem-fill"></div></div>
+              </div>
+              <div class="tok-meter">
+                <div class="tok-row"><span>TASK CONTEXT</span><span class="tv-num" id="tok-ctx">0%</span></div>
+                <div class="tok-bar"><div class="tok-fill" id="tok-ctx-fill"></div></div>
+              </div>
+              <div class="tok-meter" style="margin-bottom:0">
+                <div class="tok-row"><span>TOOL OUTPUT</span><span class="tv-num" id="tok-tool">0%</span></div>
+                <div class="tok-bar"><div class="tok-fill" id="tok-tool-fill"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WORKFLOW -->
+    <section class="section" id="workflow">
+      <div class="container">
+        <div class="eyebrow reveal">WORKFLOW</div>
+        <div class="sec-title reveal" style="--rd:0.05s">From prompt to pull request</div>
+        <p class="sec-sub reveal" style="--rd:0.1s">The same disciplined loop, every single time.</p>
+        <div class="wf-grid">
+          <div class="wf-card reveal">
+            <div class="wf-step">STEP 01</div>
+            <div class="wf-name">Clarify</div>
+            <div class="wf-desc">Ambiguity is resolved up front. Deimos asks the questions that matter before any code is touched.</div>
+            <span class="wf-arrow">→</span>
+          </div>
+          <div class="wf-card reveal" style="--rd:0.08s">
+            <div class="wf-step">STEP 02</div>
+            <div class="wf-name">Plan</div>
+            <div class="wf-desc">A dependency-aware DAG of tasks is generated — order resolved, blast radius understood.</div>
+            <span class="wf-arrow">→</span>
+          </div>
+          <div class="wf-card reveal" style="--rd:0.16s">
+            <div class="wf-step">STEP 03</div>
+            <div class="wf-name">Execute</div>
+            <div class="wf-desc">Steps run with precise tool use — files, web, git — while you watch every action live.</div>
+            <span class="wf-arrow">→</span>
+          </div>
+          <div class="wf-card reveal" style="--rd:0.24s">
+            <div class="wf-step">STEP 04</div>
+            <div class="wf-name">Remember</div>
+            <div class="wf-desc">Learnings persist to layered memory. Next session starts smarter than the last.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- INSTALL -->
+    <section class="section" id="install">
+      <div class="container">
+        <div class="eyebrow reveal">DEPLOYMENT</div>
+        <div class="sec-title reveal" style="--rd:0.05s">Get started in 60 seconds</div>
+        <p class="sec-sub reveal" style="--rd:0.1s">One command to assemble the agent.</p>
+        <div class="tabs reveal" style="--rd:0.15s">
+          <button class="tab active" data-tab="unix" type="button">Unix / WSL</button>
+          <button class="tab" data-tab="win" type="button">Windows</button>
+          <button class="tab" data-tab="cfg" type="button">Config</button>
+        </div>
+        <div class="terminal reveal" style="--rd:0.2s">
+          <div class="term-bar">
+            <div class="td td-r"></div><div class="td td-y"></div><div class="td td-g"></div>
+            <span class="term-ttl">deimos — zsh</span>
+          </div>
+          <div class="term-body2">
+            <div class="tc active" id="tc-unix">
+              <div class="tl"><span class="tc2"># Quick install — Unix / Bash / WSL</span></div>
+              <div class="tl"><span class="tp">$</span><span>curl -sSL https://deimos.sh/install | sh</span></div>
+              <div class="tl" style="margin-top:10px"><span class="tc2"># Launch the agent</span></div>
+              <div class="tl"><span class="tp">$</span><span>deimos assemble</span></div>
+              <div class="tl"><span class="tc2"># Or monitor it live</span></div>
+              <div class="tl"><span class="tp">$</span><span>deimos dashboard</span></div>
+              <button class="copy-btn" type="button" data-copy="curl -sSL https://deimos.sh/install | sh">COPY INSTALL COMMAND</button>
+            </div>
+            <div class="tc" id="tc-win">
+              <div class="tl"><span class="tc2"># Manual install — Windows / PowerShell</span></div>
+              <div class="tl"><span class="tp">&gt;</span><span>git clone https://github.com/kunal-shetty/deimos</span></div>
+              <div class="tl"><span class="tp">&gt;</span><span>cd deimos</span></div>
+              <div class="tl"><span class="tp">&gt;</span><span>python -m venv .venv</span></div>
+              <div class="tl"><span class="tp">&gt;</span><span>.\.venv\Scripts\activate</span></div>
+              <div class="tl"><span class="tp">&gt;</span><span>pip install .</span></div>
+              <button class="copy-btn" type="button" data-copy="git clone https://github.com/kunal-shetty/deimos&#10;cd deimos&#10;python -m venv .venv&#10;.venv\Scripts\activate&#10;pip install .">COPY COMMANDS</button>
+            </div>
+            <div class="tc" id="tc-cfg">
+              <div class="tl"><span class="tc2"># Create .env in the project root</span></div>
+              <div class="tl"><span class="tk">GROQ_API_KEY</span><span>=</span><span class="tv">your_groq_api_key</span></div>
+              <div class="tl"><span class="tk">TAVILY_API_KEY</span><span>=</span><span class="tv">your_tavily_api_key</span></div>
+              <div class="tl"><span class="tk">SUPABASE_URL</span><span>=</span><span class="tv">https://your-project.supabase.co</span></div>
+              <div class="tl"><span class="tk">SUPABASE_KEY</span><span>=</span><span class="tv">your-anon-key</span></div>
+              <div class="tl"><span class="tk">DEIMOS_USER_ID</span><span>=</span><span class="tv">your-user-uuid</span></div>
+              <div class="tl" style="margin-top:10px"><span class="tc2"># Initialize Supabase schema — see docs/installation.md</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- DOCS -->
+    <section class="section" id="docs">
+      <div class="container">
+        <div class="eyebrow reveal">DOCUMENTATION</div>
+        <div class="sec-title reveal" style="--rd:0.05s">Field manuals</div>
+        <p class="sec-sub reveal" style="--rd:0.1s">Everything you need to operate the agent.</p>
+        <div class="docs-grid">
+          <a class="doc-card reveal" href="https://github.com/kunal-shetty/deimos/blob/main/docs/installation.md" target="_blank" rel="noopener">
+            <div class="doc-id">DOC-INST</div>
+            <div class="doc-name">Installation &amp; Setup</div>
+            <div class="doc-desc">SQL schemas, env configuration, Supabase initialization.</div>
+            <span class="doc-arr">↗</span>
+          </a>
+          <a class="doc-card reveal" style="--rd:0.08s" href="https://github.com/kunal-shetty/deimos/blob/main/docs/architecture.md" target="_blank" rel="noopener">
+            <div class="doc-id">DOC-ARCH</div>
+            <div class="doc-name">Architecture</div>
+            <div class="doc-desc">Memory layer internals, agent loop flow, planning engine design.</div>
+            <span class="doc-arr">↗</span>
+          </a>
+          <a class="doc-card reveal" style="--rd:0.16s" href="https://github.com/kunal-shetty/deimos/blob/main/docs/user_guide.md" target="_blank" rel="noopener">
+            <div class="doc-id">DOC-USR</div>
+            <div class="doc-name">User Guide</div>
+            <div class="doc-desc">Prompting strategies, slash commands, and workflow patterns.</div>
+            <span class="doc-arr">↗</span>
+          </a>
+          <a class="doc-card reveal" style="--rd:0.24s" href="https://github.com/kunal-shetty/deimos/blob/main/docs/developer_guide.md" target="_blank" rel="noopener">
+            <div class="doc-id">DOC-DEV</div>
+            <div class="doc-name">Developer Guide</div>
+            <div class="doc-desc">Adding custom tools, extending the core, contributing to the agent.</div>
+            <span class="doc-arr">↗</span>
+          </a>
+        </div>
+      </div>
+    </section>
+    <!-- FAQ -->
+    <section class="section" id="faq">
+      <div class="container">
+        <div class="eyebrow reveal">INTEL BRIEF</div>
+        <div class="sec-title reveal" style="--rd:0.05s">Frequently asked questions</div>
+        <p class="sec-sub reveal" style="--rd:0.1s">Cleared for all operators.</p>
+        <div class="faq-list reveal" style="--rd:0.15s">
+          <div class="faq-item">
+            <button class="faq-q" type="button">What makes Deimos different from other coding agents?<span class="faq-ico">+</span></button>
+            <div class="faq-a"><div class="faq-a-inner">Deimos is <strong>plan-first</strong>: it builds a dependency-aware task DAG before touching code, and it <strong>remembers between sessions</strong> via layered pgvector memory. Most agents re-learn your codebase every run — Deimos doesn't.</div></div>
+          </div>
+          <div class="faq-item">
+            <button class="faq-q" type="button">Does it need an internet connection?<span class="faq-ico">+</span></button>
+            <div class="faq-a"><div class="faq-a-inner">Yes — inference runs on <code>Groq</code> and memory persists to <code>Supabase</code>, both cloud services. Web search via <code>Tavily</code> is optional but recommended. Your terminal stays the only interface you need.</div></div>
+          </div>
+          <div class="faq-item">
+            <button class="faq-q" type="button">Is my code safe?<span class="faq-ico">+</span></button>
+            <div class="faq-a"><div class="faq-a-inner">Only task-relevant context is sent to the model, and memory stores distilled knowledge — not full file dumps. Git operations follow your repo's branch hygiene, and every action is logged live on the dashboard.</div></div>
+          </div>
+          <div class="faq-item">
+            <button class="faq-q" type="button">Can I extend it with custom tools?<span class="faq-ico">+</span></button>
+            <div class="faq-a"><div class="faq-a-inner">Yes. Tools live in <code>tools/</code> as self-contained modules registered with the agent loop. The developer guide walks through adding one in ~30 lines.</div></div>
+          </div>
+          <div class="faq-item">
+            <button class="faq-q" type="button">What does it cost to run?<span class="faq-ico">+</span></button>
+            <div class="faq-a"><div class="faq-a-inner">Groq offers a generous free tier for <code>llama-3.3-70b</code>, and Supabase's free tier easily covers personal use. Typical sessions cost $0.</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FINAL CTA -->
+    <section class="section" id="cta">
+      <div class="container">
+        <div class="cta-banner reveal">
+          <div class="cta-inner">
+            <div class="eyebrow" style="margin-bottom:18px">TRANSMISSION ENDS</div>
+            <div class="cta-title">STOP EXPLAINING.<br>START <span class="t-grad">COMMANDING.</span></div>
+            <p class="cta-sub">Give Deimos one sentence. Get a plan, a diff, and a pull request — with the memory of every decision it made along the way.</p>
+            <div class="hero-ctas" style="margin-bottom:0">
+              <a class="btn-red" href="#install">⌘ Quick Install</a>
+              <a class="btn-outline" href="https://github.com/kunal-shetty/deimos" target="_blank" rel="noopener">Star on GitHub ☆</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- FOOTER -->
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-inner">
+          <div>
+            <div class="footer-brand"><span class="d">D</span>EIMOS // AUTONOMOUS AGENT</div>
+            <div class="footer-tag">NAMED FOR THE FEARFUL MOON OF MARS</div>
+          </div>
+          <div class="footer-links">
+            <a class="footer-lnk" href="https://github.com/kunal-shetty/deimos" target="_blank" rel="noopener">GITHUB</a>
+            <a class="footer-lnk" href="https://github.com/kunal-shetty/deimos/blob/main/docs/installation.md" target="_blank" rel="noopener">DOCS</a>
+            <a class="footer-lnk" href="https://github.com/kunal-shetty/deimos/issues" target="_blank" rel="noopener">ISSUES</a>
+          </div>
+        </div>
+        <div class="footer-base">
+          <span>© 2026 DEIMOS PROJECT</span>
+          <span class="footer-status"><span class="s-dot"></span>ALL SYSTEMS OPERATIONAL</span>
+        </div>
+      </div>
+    </footer>
+
+  </div><!-- /main -->
+  <script>
+    /* ─── BOOT SEQUENCE ─── */
+    const bootLines = [
+      { id: 'bl0', html: '<span class="boot-key">DEIMOS v1.0</span> <span class="boot-val">// INITIALIZING SECURE RUNTIME...</span>' },
+      { id: 'bl1', html: '<span class="boot-val">&gt; Loading memory index...........</span> <span class="boot-ok">[OK]</span>' },
+      { id: 'bl2', html: '<span class="boot-val">&gt; Establishing Groq channel.........</span> <span class="boot-ok">[OK]</span>' },
+      { id: 'bl3', html: '<span class="boot-val">&gt; Connecting Supabase instance......</span> <span class="boot-ok">[OK]</span>' },
+      { id: 'bl4', html: '<span class="boot-val">&gt; Verifying operator clearance......</span> <span class="boot-ok">[GRANTED]</span>' },
+      { id: 'bl5', html: '<span class="boot-key">SYSTEM ACTIVE.</span> <span class="boot-val">Welcome, operator.</span>' },
+    ];
+    let bootIdx = 0;
+    function showNextBoot() {
+      if (bootIdx < bootLines.length) {
+        const el = document.getElementById(bootLines[bootIdx].id);
+        el.innerHTML = bootLines[bootIdx].html;
+        el.classList.add('visible');
+        bootIdx++;
+        setTimeout(showNextBoot, bootIdx < 3 ? 320 : 300);
+      } else {
+        setTimeout(() => {
+          document.getElementById('bl6').style.display = 'none';
+          document.getElementById('boot').classList.add('fade-out');
+          setTimeout(() => {
+            document.getElementById('boot').style.display = 'none';
+            document.getElementById('main').classList.add('visible');
+          }, 700);
+        }, 800);
+      }
+    }
+    setTimeout(showNextBoot, 180);
+
+    /* ─── LIVE SESSION TYPING DEMO ─── */
+    const DEMO_LINES = [
+      { text: '$ deimos "Add rate limiting to the API layer"', cls: 'd-p', delay: 500 },
+      { text: '', cls: '', delay: 120 },
+      { text: '[clarify] 2 questions before execution:', cls: 'd-dim', delay: 260 },
+      { text: '  →  Scope: all endpoints or auth-only?', cls: 'd-t', delay: 300 },
+      { text: '  →  Strategy: token bucket or sliding window?', cls: 'd-t', delay: 300 },
+      { text: '[plan]     Building DAG… 4 tasks, 0 cycles', cls: 'd-c2', delay: 340 },
+      { text: '[memory]   Recall: auth middleware found at src/api/auth', cls: 'd-t', delay: 320 },
+      { text: '[exec]     t1 rate_limit.py ............. <span class="d-ok">done</span>', cls: 'd-t', delay: 380 },
+      { text: '[exec]     t2 middleware wiring ......... <span class="d-run">running</span>', cls: 'd-t', delay: 340 },
+      { text: '[git]      branch: feat/api-rate-limit', cls: 'd-c2', delay: 300 },
+      { text: '[done]     Session archived to episodic memory.', cls: 'd-ok', delay: 400 },
+    ];
+    const termBody = document.getElementById('term-body');
+    let demoStarted = false;
+    let replayBtn = document.getElementById('term-replay');
+
+    function runDemo() {
+      termBody.innerHTML = '';
+      let li = 0;
+      function nextLine() {
+        if (li >= DEMO_LINES.length) {
+          const cur = document.createElement('span');
+          cur.className = 'term-cursor';
+          termBody.appendChild(cur);
+          return;
+        }
+        const spec = DEMO_LINES[li];
+        const div = document.createElement('div');
+        div.className = spec.cls;
+        termBody.appendChild(div);
+        if (!spec.text) {
+          li++;
+          setTimeout(nextLine, spec.delay);
+          return;
+        }
+        let ci = 0;
+        const plain = spec.text.replace(/<[^>]+>/g, '');
+        function typeChar() {
+          if (ci < plain.length) {
+            div.textContent = plain.slice(0, ci + 1);
+            ci++;
+            setTimeout(typeChar, 10);
+          } else {
+            div.innerHTML = spec.text;
+            li++;
+            setTimeout(nextLine, spec.delay);
+          }
+        }
+        typeChar();
+      }
+      nextLine();
+      syncSlog(0);
+    }
+
+    if (replayBtn) replayBtn.addEventListener('click', runDemo);
+
+    /* ─── EXECUTION LOG SYNC + CONTEXT METERS ─── */
+    const slogItems = document.querySelectorAll('#slog-list li');
+    const METER_TARGETS = { 'tok-mem': 34, 'tok-ctx': 58, 'tok-tool': 21 };
+    let metersDone = false;
+    function syncSlog(step) {
+      slogItems.forEach((item, i) => {
+        const ico = item.querySelector('.slog-ico');
+        const txt = item.querySelector('.slog-txt');
+        if (i < step)      { ico.textContent = '✓'; ico.className = 'slog-ico slog-ok'; txt.className = 'slog-txt slog-txt-ok'; }
+        else if (i === step) { ico.textContent = '●'; ico.className = 'slog-ico slog-run'; txt.className = 'slog-txt slog-txt-run'; }
+        else               { ico.textContent = '○'; ico.className = 'slog-ico slog-wait'; txt.className = 'slog-txt slog-txt-wait'; }
+      });
+    }
+    function fillMeters() {
+      Object.entries(METER_TARGETS).forEach(([id, val]) => {
+        const fill = document.getElementById(id + '-fill');
+        const num = document.getElementById(id);
+        if (!fill || !num) return;
+        let cur = 0;
+        const iv = setInterval(() => {
+          cur += Math.ceil(val / 28);
+          if (cur >= val) { cur = val; clearInterval(iv); }
+          fill.style.width = cur + '%';
+          num.textContent = cur + '%';
+        }, 26);
+      });
+    }
+  /* ─── SCROLL REVEALS + COUNTERS + METERS ─── */
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (!e.isIntersecting) return;
+        e.target.classList.add('visible');
+        e.target.querySelectorAll('[data-count]').forEach(el => {
+          if (el.dataset.done) return;
+          el.dataset.done = '1';
+          countUp(el);
+        });
+        if (e.target.closest('#session') && !metersDone) { metersDone = true; fillMeters(); }
+
+        if (e.target.closest('#session') && !demoStarted) {
+          demoStarted = true;
+          setTimeout(runDemo, 500);
+        }
+        io.unobserve(e.target);
+    });
+    }, { threshold: 0.18 });
+    document.querySelectorAll('.reveal, .stats-grid').forEach(el => io.observe(el));
+
+    /* ─── COUNTER ANIMATION ─── */
+    function countUp(el) {
+      const target = parseInt(el.dataset.count, 10);
+      const dur = 1400;
+      const t0 = performance.now();
+      function tick(now) {
+        const p = Math.min((now - t0) / dur, 1);
+        el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3)));
+        if (p < 1) requestAnimationFrame(tick);
+      }
+    }
+    /* ─── NAV: SCROLL STATE + SPOTLIGHT + MENU ─── */
+    const nav = document.getElementById('nav');
+    window.addEventListener('scroll', () => {
+      nav.classList.toggle('scrolled', window.scrollY > 24);
+    }, { passive: true });
+
+    const sections = [...document.querySelectorAll('section[id]')];
+    const navLinks = [...document.querySelectorAll('.nav-links .nav-link')];
+    const spy = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (!e.isIntersecting) return;
+        navLinks.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + e.target.id));
+      });
+    }, { rootMargin: '-40% 0px -55% 0px' });
+    sections.forEach(s => spy.observe(s));
+
+    document.querySelectorAll('.bento-card, .wf-card').forEach(card => {
+      card.addEventListener('pointermove', (ev) => {
+        const r = card.getBoundingClientRect();
+        card.style.setProperty('--sx', (ev.clientX - r.left) + 'px');
+        card.style.setProperty('--sy', (ev.clientY - r.top) + 'px');
+      });
+    });
+
+    const burger = document.getElementById('burger');
+    const navMenu = document.getElementById('nav-menu');
+    if (burger) {
+      burger.addEventListener('click', () => {
+        const open = navMenu.classList.toggle('open');
+        document.body.classList.toggle('menu-open', open);
+      });
+      navMenu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
+        navMenu.classList.remove('open');
+        document.body.classList.remove('menu-open');
+      }));
+    }
+
+    /* ─── MARQUEE: duplicate track for seamless loop ─── */
+    const mTrack = document.getElementById('marquee-track');
+    if (mTrack) mTrack.innerHTML += mTrack.innerHTML;
+
+    /* ─── TABS ─── */
+    document.querySelectorAll('.tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const t = btn.dataset.tab;
+        document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tc').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        const tc = document.getElementById('tc-' + t);
+        if (tc) tc.classList.add('active');
+      });
+    });
+
+    /* ─── FAQ ACCORDION ─── */
+    document.querySelectorAll('.faq-q').forEach(q => {
+      q.addEventListener('click', () => {
+        const item = q.parentElement;
+        const ans = item.querySelector('.faq-a');
+        const isOpen = item.classList.contains('open');
+        document.querySelectorAll('.faq-item.open').forEach(o => {
+          o.classList.remove('open');
+          o.querySelector('.faq-a').style.maxHeight = '0px';
+        });
+        if (!isOpen) {
+          item.classList.add('open');
+          ans.style.maxHeight = ans.scrollHeight + 'px';
+        }
+      });
+    });
+
+    /* ─── COPY BUTTONS ─── */
+    function flash(btn) {
+      const orig = btn.textContent;
+      btn.textContent = 'COPIED ✓';
+      setTimeout(() => { btn.textContent = orig; }, 1800);
+    }
+    function fallbackCopy(text, btn) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+      flash(btn);
+    }
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const text = btn.dataset.copy || '';
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(() => flash(btn)).catch(() => fallbackCopy(text, btn));
+        } else {
+          fallbackCopy(text, btn);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
