@@ -145,6 +145,43 @@ class MemoryManager:
 
     # ── Conversation helpers ─────────────────────────────────────────────────
 
+    def summarize_segment(self, messages: list[dict]) -> str | None:
+        """
+        Summarize a block of messages into a concise narrative for long-term storage.
+        Uses the underlying LLM client to generate the summary.
+        """
+        if not messages:
+            return None
+
+        # Convert message list to a readable transcript
+        transcript = []
+        for m in messages:
+            role = m["role"]
+            content = m["content"]
+            if isinstance(content, list):
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "tool_use":
+                            text_parts.append(f"[Tool Call {item.get('name')}]: {item.get('input')}")
+                        elif item.get("type") == "tool_result":
+                            text_parts.append(f"[Tool Result]: {item.get('content')}")
+                        else:
+                            text_parts.append(str(item))
+                    else:
+                        text_parts.append(str(item))
+                content = "\n".join(text_parts)
+            transcript.append(f"{role}: {content}")
+
+        full_text = "\n".join(transcript)
+
+        from llm.client import LLMClient
+        client = LLMClient()
+        prompt = f"Summarize the following conversation segment concisely, preserving key decisions and technical facts:\n\n{full_text}"
+
+        res = client.complete(system="You are a memory compression engine. Be concise and factual.", messages=[{"role": "user", "content": prompt}])
+        return res.get("text")
+
     def list_conversations(self, limit: int = 20) -> list[dict]:
         return self.conversations.list_conversations(limit=limit)
 
