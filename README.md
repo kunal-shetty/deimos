@@ -58,6 +58,12 @@ python -m pytest
 ```
 A `.env` in the checkout is read too, so you can keep development keys there.
 
+To check the agent loop itself, run the eval harness (see [evals/README.md](evals/README.md)):
+```bash
+python -m evals run            # deterministic, offline, ~1s
+python -m evals serve          # dashboard on http://127.0.0.1:8421
+```
+
 ---
 
 ## Features
@@ -109,6 +115,7 @@ deimos/
 ├── tools/             # Tool registry and specific tool implementations
 ├── commands/          # In-session slash commands (/resume, /reset, etc.)
 ├── web/              # FastAPI Dashboard
+├── evals/             # Eval harness: sandboxed tasks, checks, traces, API
 ├── docs/              # Comprehensive project documentation
 └── main.py            # Entry point and CLI dispatch
 ```

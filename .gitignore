@@ -54,3 +54,6 @@ workspace/output.txt
 
 # Deimos per-project state (plans, saved tool outputs, checkpoints)
 .deimos/
+
+# Eval run results
+evals/results/
