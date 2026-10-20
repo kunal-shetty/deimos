@@ -292,3 +292,5 @@ def test_tool_summaries():
     assert tool_summary("run_command", {"command": "pytest -q"}) == "pytest -q"
     assert tool_summary("read_file", {"path": "a.py", "offset": 10, "limit": 5}) == "a.py, lines 10-14"
     assert tool_summary("write_file", {"path": "a.py", "content": "1\n2"}) == "a.py, 2 lines"
+    assert tool_summary("write_file", {"path": "a.py", "content": "1"}) == "a.py, 1 line"
+    assert tool_summary("delegate", {"tasks": [{"id": "s2", "task": "x"}, {"task": "y"}]}) == "2 tasks: s2, t2"

@@ -144,6 +144,7 @@ TOOL_LABELS = {
     "git_push":        "Git push",
     "git_branch":      "Git branch",
     "github_pr":       "GitHub PR",
+    "delegate":        "Delegate",
 }
 
 # Result strings starting with any of these are rendered as failures
@@ -235,7 +236,12 @@ def tool_summary(name: str, inputs: dict) -> str:
             s += f", lines {start}-{start + int(inputs['limit']) - 1}" if inputs.get("limit") else f", from line {start}"
         return s
     if name == "write_file":
-        return f"{inputs.get('path', '')}, {str(inputs.get('content', '')).count(chr(10)) + 1} lines"
+        lines = str(inputs.get("content", "")).count(chr(10)) + 1
+        return f"{inputs.get('path', '')}, {lines} line{'s' if lines != 1 else ''}"
+    if name == "delegate":
+        tasks = [t for t in inputs.get("tasks") or [] if isinstance(t, dict)]
+        ids = ", ".join(str(t.get("id") or f"t{i}") for i, t in enumerate(tasks, 1))
+        return f"{len(tasks)} task{'s' if len(tasks) != 1 else ''}: {ids}"
     if name == "run_command":
         cwd = f"  (in {inputs['cwd']})" if inputs.get("cwd") else ""
         return f"{inputs.get('command', '')}{cwd}"

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -49,6 +50,7 @@ class CheckpointStore:
         self.root = os.path.abspath(os.path.join(cwd or os.getcwd(), CHECKPOINT_DIR_NAME))
         self._current: Checkpoint | None = None
         self._last_ns = 0
+        self._lock = threading.Lock()  # sub-agents snapshot from several threads
 
     # ── Recording ────────────────────────────────────────────────────────────
 
@@ -66,6 +68,10 @@ class CheckpointStore:
 
     def snapshot(self, paths: list[str]):
         """Record the current state of each path, once per checkpoint."""
+        with self._lock:
+            self._snapshot(paths)
+
+    def _snapshot(self, paths: list[str]):
         if self._current is None:
             self.begin("(untitled)")
         cp = self._current

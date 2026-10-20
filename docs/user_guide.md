@@ -93,4 +93,69 @@ When `plan_mode` is on, Deimos follows these steps:
 1. **Analysis**: Analyzes your request.
 2. **Proposal**: Generates a detailed plan (Workflow DAG).
 3. **Confirmation**: Awaits your approval. You can simply reply "Yes", "Proceed", or provide feedback to refine the plan.
-4. **Execution**: Executes the tasks in the plan, updating the dashboard in real-time.
+4. **Execution**: Executes the tasks in the plan, updating the dashboard in real-time. Steps
+   that don't depend on each other and touch different files can run in parallel sub-agents.
+
+## 5. Checking Its Own Work
+
+After a turn that changed files, Deimos runs the project's checks before it finishes. If they
+fail, it reads the failure, fixes the cause and checks again (up to `verify.max_attempts` times,
+default 2), then tells you if they still fail.
+
+- Checks come from `verify.commands` in settings, or are detected: `python -m pytest -q -x`,
+  `npm test`, `cargo test`, `go test ./...`.
+- Changes to documentation only (`.md`, `.rst`, `.txt`) skip the checks, and a quick decision
+  skips them when a change can't affect what the tests cover (e.g. a reworded comment).
+- The checks are ordinary commands, so the permission mode applies: in `ask` mode, choose
+  "don't ask again" once for `pytest`.
+
+```json
+{ "verify": { "commands": ["python -m pytest -q", "ruff check ."], "max_attempts": 3 } }
+```
+
+Set `"verify": {"enabled": false}` to turn it off.
+
+## 6. Parallel Sub-agents
+
+Deimos can hand independent pieces of work to sub-agents that run at the same time, each with a
+fresh context, the same tools and the same permission mode. It does this on its own for
+independent plan steps, or when you ask (e.g. "use sub-agents to update the three services").
+Their tool calls appear prefixed with the task label, like `[s2] Update(api/routes.py)`, and
+approval prompts from them are shown one at a time.
+
+- The first sub-agent to edit a file owns it; the others leave it alone.
+- `ctrl+c` stops all of them after their current step.
+- Run at most `subagents.max_parallel` at once (default 2). More parallel requests can hit the
+  model provider's rate limits; Deimos waits and retries when that happens.
+
+## 7. Hooks
+
+Hooks are shell commands that run around tool calls, configured under `"hooks"` in
+`~/.deimos/settings.json` or a project's `.deimos/settings.json`:
+
+```json
+{
+  "hooks": {
+    "pre_tool":  [{ "command": "python scripts/guard.py", "tools": ["run_command"] }],
+    "post_edit": ["ruff format $DEIMOS_FILES"],
+    "on_stop":   [{ "command": "npm run lint", "timeout": 120 }]
+  }
+}
+```
+
+| Event | Runs | A non-zero exit... |
+|---|---|---|
+| `pre_tool` | before a tool runs (after approval) | blocks the tool; the output is the reason |
+| `post_tool` | after any tool | adds the output to the tool result |
+| `post_edit` | after a file edit | adds the output to the tool result |
+| `on_stop` | when Deimos is about to finish a turn | sends the output back and Deimos keeps working |
+
+An entry is a command string or an object with `command`, optional `tools` (only run for these
+tools) and `timeout` in seconds (default 60). Each hook gets `DEIMOS_EVENT`, `DEIMOS_TOOL`,
+`DEIMOS_TOOL_INPUT` (JSON) and `DEIMOS_FILES` as environment variables, and the same details as
+JSON on stdin.
+
+**Trust:** hooks in your own `~/.deimos/settings.json` always run. Commands defined by a project
+(its hooks and `verify.commands`) run only after you approve them once; Deimos remembers the
+approval for that project until the commands change, so a cloned repository can't run commands
+without your say-so.

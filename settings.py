@@ -38,6 +38,12 @@ def load_settings(cwd: str | None = None) -> dict:
     return _cache[root]
 
 
+def load_layers(cwd: str | None = None) -> tuple[dict, dict, Path]:
+    """(user settings, project settings, project settings path), unmerged and without defaults."""
+    project_file = Path(os.path.abspath(cwd or os.getcwd())) / ".deimos" / "settings.json"
+    return _read(LOCAL_DIR / "settings.json"), _read(project_file), project_file
+
+
 def reload_settings():
     """Forget cached settings so the next load re-reads the files."""
     _cache.clear()

@@ -1,14 +1,19 @@
 import json
+import os
 import re
 import subprocess
+import threading
 import time
 
 import requests
 from config import MAX_ITERATIONS, DASHBOARD_HOST, DASHBOARD_PORT
 from agent.checkpoints import CheckpointStore
 from agent.context import Context
+from agent.hooks import HookRunner
 from agent.instructions import load_instructions
 from agent.permissions import Permissions
+from agent.subagent import DelegateTool, FileClaims, run_subagents
+from agent.verify import detect_commands, failure_message, needs_verification
 from agent.planner import Planner, StepStatus, AnalysisResult
 from llm.client import LLMClient
 from settings import load_settings
@@ -16,6 +21,15 @@ from tools.base import FileChange
 from tools.registry import ToolRegistry
 from ui.terminal import TerminalUI
 from memory.manager import MemoryManager
+
+def _display_path(path: str) -> str:
+    """Path relative to the working directory when it's inside it, else absolute."""
+    try:
+        rel = os.path.relpath(path)
+    except ValueError:  # another drive on Windows
+        return path
+    return path if rel.startswith("..") else rel
+
 
 SESSION_SUMMARY_KEY = "session_summary"
 SESSION_SUMMARY_HEADER = (
@@ -46,6 +60,13 @@ class Agent:
         self.planner = Planner(llm_client=llm)
         self.permissions = permissions or Permissions(ui, mode=load_settings()["permission_mode"])
         self.checkpoints = CheckpointStore()
+        self.hooks = HookRunner(ui)
+        self.claims: FileClaims | None = None  # set while sub-agents are running
+        self._turn_edits: set[str] = set()     # files edited this turn (hooks)
+        self._unverified: set[str] = set()     # edited since the last passing check
+        self._edits_lock = threading.Lock()
+        self._verify_attempts = self._stop_retries = 0
+        self.tools.register(DelegateTool(self))
 
         self._pending_plan = None  # Plan awaiting confirmation
         self._pending_task = None  # the original task text, replayed on confirm
@@ -175,7 +196,9 @@ class Agent:
         self.ctx.set_transient("workflow", (
             "## Current Workflow Status\n"
             f"{self.active_plan.to_markdown()}\n"
-            "Work through the steps in dependency order. When you finish a step, "
+            "Work through the steps in dependency order. When two or more steps are ready (their "
+            "dependencies are completed) and touch different files, run them in parallel with the "
+            "`delegate` tool, one task per step with full instructions. When you finish a step, "
             "write `[Step <id> completed]` (e.g. `[Step s1 completed]`) on its own line."
         ))
 
@@ -185,6 +208,9 @@ class Agent:
         start_out = self.llm.total_output_tokens
 
         self.checkpoints.begin(user_input)
+        self._turn_edits.clear()
+        self._unverified.clear()
+        self._verify_attempts = self._stop_retries = 0
         self.memory.detect_and_inject_project(user_input, self.ctx)
         self._recall(user_input)
         self._inject_git_context()
@@ -247,6 +273,10 @@ class Agent:
                 self._inject_workflow_status()
 
             if response["stop_reason"] == "end_turn" or not response["tool_calls"]:
+                follow_up = self._before_finishing(user_input)
+                if follow_up:
+                    self.ctx.add_user(follow_up)
+                    continue
                 self.ui.turn_end({
                     "turns": iterations,
                     "input_tokens": self.llm.total_input_tokens - start_in,
@@ -295,40 +325,122 @@ class Agent:
 
         self.ui.error(f"Reached max iterations ({MAX_ITERATIONS}). Stopping.")
 
-    def _execute_tool(self, name: str, inputs: dict) -> str:
+    def _execute_tool(self, name: str, inputs: dict, ui=None, owner: str | None = None) -> str:
         """
-        Run one tool call through the permission gate. Edit tools show their
-        diff (asking first unless the mode allows edits) and the files they
-        touch are checkpointed so /undo can restore them.
+        Run one tool call through the permission gate and hooks. Edit tools
+        show their diff (asking first unless the mode allows edits) and the
+        files they touch are checkpointed so /undo can restore them.
+        `ui` and `owner` are set when a sub-agent makes the call.
         """
+        ui = ui or self.ui
         tool = self.tools.get(name)
         if tool is None:
             return self.tools.dispatch(name, inputs)
 
         change = None
+        paths = tool.target_paths(**inputs) if tool.kind == "edit" else []
         if tool.kind == "edit":
+            if owner and self.claims:
+                for path in paths:
+                    other = self.claims.claim(path, owner)
+                    if other:
+                        return f"Error: {path} is being edited by sub-agent {other}; leave it to them."
             preview = tool.preview(**inputs)
             if isinstance(preview, str):
                 return preview  # the edit would fail; report it without asking
             change = preview
 
-        verdict = self.permissions.check(tool, inputs, change)
+        verdict = self.permissions.check(tool, inputs, change, ui=ui)
         if not verdict.allowed:
             return verdict.message
         if isinstance(change, FileChange) and not verdict.prompted:
-            self.ui.show_change(change)
+            ui.show_change(change)
+
+        blocked = [r for r in self.hooks.run("pre_tool", name, inputs, files=paths) if r.failed]
+        if blocked:
+            return f"Denied: a pre_tool hook blocked this call. {blocked[0].describe()}"
 
         if tool.kind == "edit":
             try:
-                self.checkpoints.snapshot(tool.target_paths(**inputs))
+                self.checkpoints.snapshot(paths)
             except OSError as e:
                 return f"Error: could not checkpoint files before editing ({e}); edit not applied."
 
-        self.ui.tool_running(name)
+        ui.tool_running(name)
         try:
-            return self.tools.dispatch(name, inputs)
+            result = self.tools.dispatch(name, inputs)
         finally:
-            self.ui._stop_spinner()
+            ui._stop_spinner()
+
+        succeeded = not result.startswith(("Error", "[exit"))
+        notes = [r for r in self.hooks.run("post_tool", name, inputs, files=paths, result=result) if r.failed]
+        if tool.kind == "edit" and succeeded:
+            with self._edits_lock:
+                self._turn_edits.update(os.path.abspath(p) for p in paths)
+                self._unverified.update(os.path.abspath(p) for p in paths)
+            notes += [r for r in self.hooks.run("post_edit", name, inputs, files=paths, result=result) if r.failed]
+        for note in notes:
+            result += f"\n\n[{note.hook.command} reported a problem] {note.describe()}"
+        return result
+
+    def delegate(self, tasks: list) -> str:
+        """Run independent tasks in parallel sub-agents (the `delegate` tool)."""
+        tasks = [t for t in tasks or [] if isinstance(t, dict) and str(t.get("task", "")).strip()]
+        if not tasks:
+            return "Error: delegate needs at least one task with instructions."
+        self.hooks.ensure_trust()  # ask now, on the main thread, before workers start
+        reports = run_subagents(self, tasks, int(load_settings()["subagents"].get("max_parallel", 2)))
+        done = sum(r.ok for r in reports)
+        self.ui.success(f"Sub-agents finished: {done}/{len(reports)} completed")
+        return "\n\n".join(
+            f"## {r.label}: {'done' if r.ok else 'not finished'}\nTask: {r.task[:300]}\n\n{r.summary}"
+            for r in reports
+        )
+
+    def _before_finishing(self, request: str) -> str | None:
+        """
+        Gates the end of a turn: failing on_stop hooks or failing verification
+        produce a message for the agent to act on before it may finish.
+        """
+        settings = load_settings()["verify"]
+        max_attempts = int(settings.get("max_attempts", 2))
+
+        if self._stop_retries < max_attempts:
+            failed = [r for r in self.hooks.run("on_stop", files=sorted(self._turn_edits)) if r.failed]
+            if failed:
+                self._stop_retries += 1
+                self.ui.info(f"An on_stop hook failed; asking Deimos to fix it ({self._stop_retries}/{max_attempts}).")
+                return ("[System: an on_stop hook failed:\n" + "\n\n".join(r.describe() for r in failed)
+                        + "\nFix the problem, then finish your answer.]")
+
+        if not settings.get("enabled", True) or not self._unverified:
+            return None
+        if self._verify_attempts >= max_attempts:
+            self.ui.error(f"Checks still failing after {max_attempts} attempts; stopping here.")
+            self._unverified.clear()
+            return None
+        commands = self.hooks.verify_commands() or detect_commands()
+        if not commands:
+            return None
+        files = sorted(_display_path(p) for p in self._unverified)
+        if not needs_verification(files, request):
+            self._unverified.clear()
+            return None
+
+        self.ui.info("Checking the changes...")
+        for command in commands:
+            self.ui.tool_call("run_command", {"command": command})
+            result = self._execute_tool("run_command", {"command": command})
+            self.ui.tool_result(result)
+            if result.startswith(("User declined", "Denied")):
+                self._unverified.clear()  # the user chose not to run checks
+                return None
+            if result.startswith(("[exit", "Error")):
+                self._verify_attempts += 1
+                return failure_message(command, result, self._verify_attempts, max_attempts)
+        self._unverified.clear()
+        self.ui.success(f"Checks passed: {', '.join(commands)}")
+        return None
 
     def undo_last_turn(self):
         """Restore the files changed in the most recent checkpointed turn."""

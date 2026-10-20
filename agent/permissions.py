@@ -76,7 +76,11 @@ class Permissions:
 
     # ── Decision ─────────────────────────────────────────────────────────────
 
-    def check(self, tool, inputs: dict, change=None) -> Verdict:
+    def check(self, tool, inputs: dict, change=None, ui=None) -> Verdict:
+        """Decide whether a tool call may run. `ui` overrides where prompts go (sub-agents)."""
+        return self._check(tool, inputs, change, ui or self.ui)
+
+    def _check(self, tool, inputs: dict, change, ui) -> Verdict:
         if tool.kind == "read":
             return Verdict(True)
         if self.mode == "read-only":
@@ -89,19 +93,19 @@ class Permissions:
             command = inputs.get("command", "")
             dangerous, reason = self.command_danger(command)
             if dangerous:
-                return self._ask(tool, inputs, change, danger=True, reason=reason, grant=None)
+                return self._ask(ui, tool, inputs, change, danger=True, reason=reason, grant=None)
 
         if tool.kind == "edit":
             if self.mode in ("auto-edit", "auto") or "edit" in self._grants:
                 return Verdict(True)
-            return self._ask(tool, inputs, change, grant=("edit", "file edits"))
+            return self._ask(ui, tool, inputs, change, grant=("edit", "file edits"))
 
         grant = self._exec_grant(tool, inputs)
         if self.mode == "auto" and not tool.outward:
             return Verdict(True)
         if grant and grant[0] in self._grants:
             return Verdict(True)
-        return self._ask(tool, inputs, change, grant=grant)
+        return self._ask(ui, tool, inputs, change, grant=grant)
 
     def command_danger(self, command: str) -> tuple[bool, str | None]:
         """Regex first, then the structured safety check. Cached per command."""
@@ -132,7 +136,7 @@ class Permissions:
         program = command.split()[0]
         return (f"cmd:{program}", f"`{program}` commands")
 
-    def _ask(self, tool, inputs, change, grant, danger: bool = False, reason: str | None = None) -> Verdict:
+    def _ask(self, ui, tool, inputs, change, grant, danger: bool = False, reason: str | None = None) -> Verdict:
         from ui.terminal import tool_summary, WHITE, YELLOW, RED, RESET
 
         detail = []
@@ -153,7 +157,7 @@ class Permissions:
             title = tool.name.replace("_", " ").capitalize()
             question = "Do you want to proceed?"
 
-        answer, feedback = self.ui.ask_permission(
+        answer, feedback = ui.ask_permission(
             title, detail, change=change if tool.kind == "edit" else None,
             danger=danger, always_label=grant[1] if grant else None, question=question,
         )
