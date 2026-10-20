@@ -4,6 +4,7 @@ from .list_skills import SKILLS_DIR
 
 
 class ReadSkillTool(BaseTool):
+    kind = "read"
     name = "read_skill"
     description = (
         "Read the full instructions for a named skill (from list_skills). "

@@ -11,7 +11,7 @@
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 Deimos is a terminal-based AI agent that thinks, plans, and executes code changes in your workspace.
 
@@ -44,7 +44,7 @@ Deimos requires a Supabase instance for its memory. Please run the setup SQL pro
 
 ---
 
-## 🛠️ Features
+## Features
 
 - **Multi-Layer Memory**: Persistent semantic, episodic, and project-specific knowledge.
 - **Workflow Planning**: Generates a dependency-aware DAG of tasks before executing.
@@ -53,7 +53,7 @@ Deimos requires a Supabase instance for its memory. Please run the setup SQL pro
 - **Git Lifecycle**: Native support for Git operations and GitHub PR management.
 - **Real-time Dashboard**: A FastAPI-powered web UI to monitor the agent's internal thoughts and memory.
 
-## ⌨️ Basic Usage
+## Basic Usage
 
 ```bash
 # Start the agent
@@ -69,7 +69,7 @@ deimos dashboard
 deimos update
 ```
 
-## 📖 Documentation
+## Documentation
 
 For detailed guides, please refer to the `/docs` folder:
 - [Installation & Setup](docs/installation.md) — SQL schemas and env config.
@@ -80,7 +80,7 @@ For detailed guides, please refer to the `/docs` folder:
 
 ---
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 deimos/

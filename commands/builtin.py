@@ -42,7 +42,8 @@ class ResumeCommand(Command):
             memory = MemoryManager(user_id=state.agent.memory.user_id, resume_id=target_id)
             state.agent = Agent(ui=state.ui, llm=state.llm, tools=state.tools,
                                 system_prompt=state.system_prompt, memory=memory,
-                                plan_mode=state.agent.plan_mode)
+                                plan_mode=state.agent.plan_mode,
+                                permissions=state.agent.permissions)
             state.shutdown_done = False
         except Exception as e:
             state.ui.error(f"Failed to resume conversation: {e}")
@@ -158,6 +159,7 @@ class StatusCommand(Command):
             "Fast model": _fast_model_name(),
             "Decisions": _decider_status(),
             "Session tokens": f"↑{state.llm.total_input_tokens} ↓{state.llm.total_output_tokens}",
+            "Permission mode": agent.permissions.mode,
             "Plan mode": "on" if agent.plan_mode else "off",
             "Verbose": "on" if state.ui.verbose else "off",
         })
@@ -255,6 +257,55 @@ class PlanRejectCommand(Command):
         state.agent._resolve_pending_plan("/plan-reject")
 
 
+# ── Safety: permission modes and checkpoints ─────────────────────────────────
+
+class ModeCommand(Command):
+    name = "mode"
+    description = "Show or set the permission mode (ask, auto-edit, auto, read-only)"
+    usage = "/mode [ask|auto-edit|auto|read-only]"
+    def run(self, args, state):
+        from agent.permissions import MODES, MODE_DESCRIPTIONS
+        perms = state.agent.permissions
+        arg = args.strip().lower()
+        if not arg:
+            state.ui.info(f"Permission mode: {perms.mode} ({MODE_DESCRIPTIONS[perms.mode]})")
+            for m in MODES:
+                state.ui.info(f"  {m:<10} {MODE_DESCRIPTIONS[m]}")
+            return
+        try:
+            perms.set_mode(arg)
+        except ValueError as e:
+            state.ui.error(str(e))
+            return
+        state.ui.success(f"Permission mode set to {arg}: {MODE_DESCRIPTIONS[arg]}")
+
+
+class UndoCommand(Command):
+    name = "undo"
+    description = "Restore the files changed in the last agent turn"
+    def run(self, args, state):
+        result = state.agent.undo_last_turn()
+        if result is None:
+            state.ui.info("Nothing to undo: no file changes have been checkpointed in this project.")
+            return
+        cwd = os.getcwd()
+        for path in result.restored:
+            state.ui.success(f"Restored {os.path.relpath(path, cwd)}")
+        for path in result.deleted:
+            state.ui.success(f"Deleted {os.path.relpath(path, cwd)} (created by the agent)")
+        for path in result.failed:
+            state.ui.error(f"Could not restore {path}")
+        state.ui.info(f"Undid: {result.checkpoint.label}")
+        state.ui.info("Changes made by shell commands are not tracked and were not undone.")
+
+
+class CheckpointsCommand(Command):
+    name = "checkpoints"
+    description = "List file checkpoints that /undo can restore"
+    def run(self, args, state):
+        state.ui.print_checkpoints(state.agent.checkpoints.list())
+
+
 # ── Project instructions ─────────────────────────────────────────────────────
 
 INIT_PROMPT = (
@@ -333,7 +384,7 @@ def build_registry():
         MemoryCommand, ProjectsCommand, ProjectCommand, TitleCommand, DeleteCommand,
         StatusCommand, ModelCommand, VerboseCommand, ClearScreenCommand,
         PlanCommand, PlansCommand, PlanRejectCommand, DashboardCommand,
-        InitCommand, InstructionsCommand,
+        InitCommand, InstructionsCommand, ModeCommand, UndoCommand, CheckpointsCommand,
     ]:
         registry.register(cmd_cls())
     global REGISTRY

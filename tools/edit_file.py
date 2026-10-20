@@ -1,8 +1,9 @@
-from .base import BaseTool
+from .base import BaseTool, FileChange
 
 
 class EditFileTool(BaseTool):
     name = "edit_file"
+    kind = "edit"
     description = (
         "Make a targeted edit to an existing file by replacing an exact text "
         "match with new text. Use this instead of write_file when changing "
@@ -30,7 +31,36 @@ class EditFileTool(BaseTool):
         "required": ["path", "old_text", "new_text"],
     }
 
+    def target_paths(self, path: str = "", **kwargs) -> list[str]:
+        return [path] if path else []
+
+    def preview(self, path: str = "", old_text: str = "", new_text: str = "", **kwargs) -> FileChange | str:
+        result = self._apply(path, old_text, new_text)
+        if isinstance(result, str):
+            return result
+        content, new_content = result
+        return FileChange(path, content, new_content)
+
     def run(self, path: str, old_text: str, new_text: str = "") -> str:
+        result = self._apply(path, old_text, new_text)
+        if isinstance(result, str):
+            return result
+        _, new_content = result
+
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+        except PermissionError:
+            return f"Error: Permission denied: {path}"
+        except Exception as e:
+            return f"Error writing file: {e}"
+
+        old_lines = old_text.count("\n") + 1
+        new_lines = new_text.count("\n") + 1
+        return f"Edited: {path} ({old_lines} line(s) -> {new_lines} line(s))"
+
+    def _apply(self, path: str, old_text: str, new_text: str) -> tuple[str, str] | str:
+        """Return (current content, edited content), or an error string."""
         try:
             with open(path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -56,16 +86,4 @@ class EditFileTool(BaseTool):
                 "Include more surrounding context to make the match unique."
             )
 
-        new_content = content.replace(old_text, new_text, 1)
-
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-        except PermissionError:
-            return f"Error: Permission denied: {path}"
-        except Exception as e:
-            return f"Error writing file: {e}"
-
-        old_lines = old_text.count("\n") + 1
-        new_lines = new_text.count("\n") + 1
-        return f"Edited: {path} ({old_lines} line(s) -> {new_lines} line(s))"
+        return content, content.replace(old_text, new_text, 1)

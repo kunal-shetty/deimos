@@ -12,6 +12,7 @@ EMPHASIS_RE = re.compile(r"(\*\*.+?\*\*|\*.+?\*)")
 
 
 class CreateDocxTool(BaseTool):
+    kind = "edit"
     name = "create_docx"
     description = (
         "Create a Word (.docx) document from a structured content array. "
@@ -39,6 +40,11 @@ class CreateDocxTool(BaseTool):
         },
         "required": ["output_path", "content"],
     }
+
+    def target_paths(self, output_path: str = "", **kwargs) -> list[str]:
+        if not output_path:
+            return []
+        return [output_path if output_path.endswith(".docx") else output_path + ".docx"]
 
     def run(self, output_path: str, content: list) -> str:
         if not DOCX_AVAILABLE:

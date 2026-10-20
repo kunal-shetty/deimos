@@ -18,6 +18,23 @@ Deimos supports several in-session commands to manage your experience:
 - `/exit`: Save session and quit.
 - `/status`: Show current session info (working dir, models, decision backend, plan mode).
 
+### Permissions and Undo
+- `/mode [ask|auto-edit|auto|read-only]`: Show or switch the permission mode.
+  - `ask` (default): show a diff and ask before each file edit; ask before each command.
+  - `auto-edit`: apply file edits automatically (the diff is still shown); ask before commands.
+  - `auto`: apply edits and run commands automatically. Pushes and PRs still ask.
+  - `read-only`: the agent can read and search but not edit files or run commands.
+- At an approval prompt: `y` allows once, `a` allows that kind of action for the rest of the
+  session (all edits, one tool, or one command program such as `pytest`), `n` declines, and
+  typing anything else declines and passes your text to the agent as instructions.
+- Commands that look destructive (a known pattern, or flagged by the safety check) always ask,
+  in every mode, and can't be allowed with `a`.
+- `/undo`: Restore the files changed in the last agent turn (files the agent created are
+  deleted). Run it again to go further back. Changes made by shell commands aren't tracked.
+- `/checkpoints`: List the turns `/undo` can restore.
+- Start a session in a given mode with `deimos assemble --mode auto-edit`, or set
+  `"permission_mode"` in `.deimos/settings.json`.
+
 ### Project Instructions
 - `/init [--force]`: Explore the project and write a `DEIMOS.md` with its commands, layout and conventions.
 - `/instructions`: List the `DEIMOS.md` files loaded into this session.

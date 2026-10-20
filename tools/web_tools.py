@@ -3,6 +3,7 @@ from tools.base import BaseTool
 from config import TAVILY_API_KEY
 
 class WebSearchTool(BaseTool):
+    kind = "read"
     """Search the web for LLM-optimized results using Tavily."""
 
     @property
@@ -66,6 +67,7 @@ class WebSearchTool(BaseTool):
 
 
 class WebReadTool(BaseTool):
+    kind = "read"
     """Extract clean content from a specific URL using Tavily."""
 
     @property

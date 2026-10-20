@@ -268,7 +268,7 @@ class LLMClient:
                 if attempt == RETRY_ATTEMPTS:
                     response.raise_for_status()
 
-                print(f"\r  \033[2m⏳ Rate limited — retrying in {wait:.0f}s (attempt {attempt}/{RETRY_ATTEMPTS})...\033[0m",
+                print(f"\r  \033[2mRate limited, retrying in {wait:.0f}s (attempt {attempt}/{RETRY_ATTEMPTS})...\033[0m",
                       end="", flush=True)
                 time.sleep(wait)
                 delay *= 2

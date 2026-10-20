@@ -11,6 +11,7 @@ MAX_ENTRIES = 500
 
 
 class ListDirectoryTool(BaseTool):
+    kind = "read"
     name = "list_directory"
     description = (
         "List files and folders under a directory, recursively, as a tree. "

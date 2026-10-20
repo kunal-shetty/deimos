@@ -19,6 +19,7 @@ _RG_PATH = shutil.which("rg")
 
 
 class SearchCodebaseTool(BaseTool):
+    kind = "read"
     name = "search_codebase"
     description = (
         "Search for a text pattern (plain text or regex) across files in a "

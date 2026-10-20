@@ -1,9 +1,10 @@
 import os
-from .base import BaseTool
+from .base import BaseTool, FileChange
 
 
 class WriteFileTool(BaseTool):
     name = "write_file"
+    kind = "edit"
     description = (
         "Write content to a file at the given path. "
         "Creates the file (and any parent directories) if it doesn't exist, "
@@ -23,6 +24,22 @@ class WriteFileTool(BaseTool):
         },
         "required": ["path", "content"],
     }
+
+    def target_paths(self, path: str = "", **kwargs) -> list[str]:
+        return [path] if path else []
+
+    def preview(self, path: str = "", content: str = "", **kwargs) -> FileChange | str:
+        if not path:
+            return "Error: path is required"
+        if not os.path.exists(path):
+            return FileChange(path, None, content)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return FileChange(path, f.read(), content)
+        except UnicodeDecodeError:
+            return FileChange(path, "(binary file)\n", content)
+        except Exception as e:
+            return f"Error reading file: {e}"
 
     def run(self, path: str, content: str) -> str:
         try:

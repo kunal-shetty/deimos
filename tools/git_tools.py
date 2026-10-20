@@ -20,6 +20,7 @@ class GitToolBase(BaseTool):
             return "Error: 'git' command not found. Please ensure Git is installed."
 
 class GitStatusTool(GitToolBase):
+    kind = "read"
     """Get the current status of the git repository."""
 
     @property
@@ -96,6 +97,7 @@ class GitCommitTool(GitToolBase):
         return self._run_git(["commit", "-m", message])
 
 class GitPushTool(GitToolBase):
+    outward = True
     """Push commits to the remote repository."""
 
     @property
@@ -156,6 +158,7 @@ class GitBranchTool(GitToolBase):
         return "Error: Invalid action."
 
 class GitHubPRTool(GitToolBase):
+    outward = True
     """Manage GitHub Pull Requests using the gh CLI."""
 
     @property

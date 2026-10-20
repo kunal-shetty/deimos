@@ -5,12 +5,15 @@ import time
 
 import requests
 from config import MAX_ITERATIONS, DASHBOARD_HOST, DASHBOARD_PORT
+from agent.checkpoints import CheckpointStore
 from agent.context import Context
 from agent.instructions import load_instructions
+from agent.permissions import Permissions
 from agent.planner import Planner, StepStatus, AnalysisResult
 from llm.client import LLMClient
+from settings import load_settings
+from tools.base import FileChange
 from tools.registry import ToolRegistry
-from tools.run_command import is_dangerous
 from ui.terminal import TerminalUI
 from memory.manager import MemoryManager
 
@@ -33,14 +36,16 @@ class Agent:
     """
 
     def __init__(self, ui: TerminalUI, llm: LLMClient, tools: ToolRegistry,
-                 system_prompt: str, memory: MemoryManager, plan_mode: bool = True):
+                 system_prompt: str, memory: MemoryManager, plan_mode: bool = True,
+                 permissions: Permissions | None = None):
         self.ui = ui
         self.llm = llm
         self.tools = tools
         self.memory = memory
         self.plan_mode = plan_mode
         self.planner = Planner(llm_client=llm)
-
+        self.permissions = permissions or Permissions(ui, mode=load_settings()["permission_mode"])
+        self.checkpoints = CheckpointStore()
 
         self._pending_plan = None  # Plan awaiting confirmation
         self._pending_task = None  # the original task text, replayed on confirm
@@ -171,6 +176,7 @@ class Agent:
         start_in = self.llm.total_input_tokens
         start_out = self.llm.total_output_tokens
 
+        self.checkpoints.begin(user_input)
         self.memory.detect_and_inject_project(user_input, self.ctx)
         self._inject_git_context()
 
@@ -186,8 +192,13 @@ class Agent:
             response = self._stream_or_complete()
 
             raw_content = response["raw_content"]
+            text = response["text"] or ""
             self.ctx.add_assistant(raw_content)
             self.memory.save_message("assistant", raw_content)
+            if self._streamed:
+                self.ui.stream_end()
+            elif text:
+                self.ui.agent_response(text)
 
             # --- Dashboard Real-time Push ---
             try:
@@ -197,19 +208,20 @@ class Agent:
                 update_type = "thought"
                 if response["tool_calls"]:
                     update_type = "tool"
-                elif "completed" in raw_content.lower():
+                elif "completed" in text.lower():
                     update_type = "workflow"
 
+                message = text or ", ".join(c["name"] for c in response["tool_calls"])
                 requests.post(push_url, json={
                     "type": update_type,
-                    "message": raw_content[:500] + "..." if len(raw_content) > 500 else raw_content
+                    "message": message[:500] + "..." if len(message) > 500 else message
                 }, timeout=0.1)
-            except:
+            except Exception:
                 pass
 
             # --- Workflow Tracking ---
             if self.active_plan:
-                matches = re.findall(r"\[Step\s+([a-zA-Z0-9]+)\s+completed\]", raw_content)
+                matches = re.findall(r"\[Step\s+([a-zA-Z0-9]+)\s+completed\]", text)
                 for step_id in matches:
                     for step in self.active_plan.steps:
                         if step.id == step_id:
@@ -226,11 +238,6 @@ class Agent:
                 self._inject_workflow_status()
 
             if response["stop_reason"] == "end_turn" or not response["tool_calls"]:
-                if not self._streamed:
-                    if response["text"]:
-                        self.ui.agent_response(response["text"])
-                else:
-                    self.ui.stream_end()
                 self.ui.turn_end({
                     "turns": iterations,
                     "input_tokens": self.llm.total_input_tokens - start_in,
@@ -240,23 +247,10 @@ class Agent:
                 return
 
             for call in response["tool_calls"]:
-                if call["name"] == "run_command":
-                    cmd = call["inputs"].get("command", "")
-                    if is_dangerous(cmd):
-                        confirmed = self.ui.confirm_dangerous(cmd)
-                        if not confirmed:
-                            self.ui.tool_skipped(call["name"])
-                            result = "User cancelled: command was flagged as potentially destructive."
-                            self.ctx.add_tool_result(call["id"], result)
-                            self.memory.save_message("tool", {
-                                "tool_call_id": call["id"], "name": call["name"], "content": result,
-                            })
-                            continue
-
                 self.ui.tool_call(call["name"], call["inputs"])
 
                 # --- Self-Healing Loop ---
-                result = self.tools.dispatch(call["name"], call["inputs"])
+                result = self._execute_tool(call["name"], call["inputs"])
                 retries = 0
                 while result.startswith("Error:") and retries < 3:
                     self.ui.info(f"Self-healing: Tool {call['name']} failed. Attempting fix {retries+1}/3...")
@@ -277,7 +271,7 @@ class Agent:
                         )
                         if new_inputs and "error" not in new_inputs:
                             call["inputs"] = new_inputs
-                            result = self.tools.dispatch(call["name"], new_inputs)
+                            result = self._execute_tool(call["name"], new_inputs)
                     except Exception:
                         pass  # fall through to the retry counter below
 
@@ -291,6 +285,53 @@ class Agent:
 
 
         self.ui.error(f"Reached max iterations ({MAX_ITERATIONS}). Stopping.")
+
+    def _execute_tool(self, name: str, inputs: dict) -> str:
+        """
+        Run one tool call through the permission gate. Edit tools show their
+        diff (asking first unless the mode allows edits) and the files they
+        touch are checkpointed so /undo can restore them.
+        """
+        tool = self.tools.get(name)
+        if tool is None:
+            return self.tools.dispatch(name, inputs)
+
+        change = None
+        if tool.kind == "edit":
+            preview = tool.preview(**inputs)
+            if isinstance(preview, str):
+                return preview  # the edit would fail; report it without asking
+            change = preview
+
+        verdict = self.permissions.check(tool, inputs, change)
+        if not verdict.allowed:
+            return verdict.message
+        if isinstance(change, FileChange) and not verdict.prompted:
+            self.ui.show_change(change)
+
+        if tool.kind == "edit":
+            try:
+                self.checkpoints.snapshot(tool.target_paths(**inputs))
+            except OSError as e:
+                return f"Error: could not checkpoint files before editing ({e}); edit not applied."
+
+        self.ui.tool_running(name)
+        try:
+            return self.tools.dispatch(name, inputs)
+        finally:
+            self.ui._stop_spinner()
+
+    def undo_last_turn(self):
+        """Restore the files changed in the most recent checkpointed turn."""
+        result = self.checkpoints.undo()
+        if result and (result.restored or result.deleted):
+            files = ", ".join(result.restored + result.deleted)
+            self.ctx.add_user(
+                f"[System: the user ran /undo. These files were restored to their state before "
+                f"the turn \"{result.checkpoint.label}\": {files}. Re-read them before editing again.]"
+            )
+            self.ctx.add_assistant("Understood. I'll re-read those files before making further changes.")
+        return result
 
     def _compact_if_needed(self):
         """

@@ -5,6 +5,7 @@ SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 
 class ListSkillsTool(BaseTool):
+    kind = "read"
     name = "list_skills"
     description = (
         "List all available skills. Skills contain best-practice instructions "

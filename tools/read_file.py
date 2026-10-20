@@ -2,6 +2,7 @@ from .base import BaseTool
 
 
 class ReadFileTool(BaseTool):
+    kind = "read"
     name = "read_file"
     description = (
         "Read the contents of a file at the given path. "

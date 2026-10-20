@@ -126,7 +126,9 @@ def _save_full_output(tool_name: str, result: str, cwd: str | None) -> str | Non
         out_dir = os.path.join(cwd or os.getcwd(), OUTPUT_DIR_NAME)
         os.makedirs(out_dir, exist_ok=True)
         safe = re.sub(r"[^A-Za-z0-9_-]", "_", tool_name)
-        path = os.path.join(out_dir, f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 1_000_000:06d}-{safe}.txt")
+        ns = time.time_ns()
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(ns // 1_000_000_000)) + f"-{ns % 1_000_000_000:09d}"
+        path = os.path.join(out_dir, f"{stamp}-{safe}.txt")
         with open(path, "w", encoding="utf-8") as f:
             f.write(result)
         _prune(out_dir)

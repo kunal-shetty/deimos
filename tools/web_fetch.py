@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from tools.base import BaseTool
 
 class FetchUrlTool(BaseTool):
+    kind = "read"
     """
     Fetches content from a URL and converts it to clean markdown-like text.
     Useful for reading documentation, GitHub issues, and web pages.
