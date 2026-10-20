@@ -32,7 +32,7 @@ deimos = "main:main"
 
 [tool.setuptools]
 py-modules = ["main", "config", "settings"]
-packages = ["agent", "tools", "llm", "ui", "memory", "commands", "web", "auth", "prompts", "skills"]
+packages = ["agent", "tools", "llm", "ui", "memory", "commands", "web", "auth", "prompts", "skills", "evals"]
 
 [tool.setuptools.package-data]
 prompts = ["*.txt", "*.md"]
