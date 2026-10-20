@@ -192,9 +192,31 @@ def _term_width(default: int = 100) -> int:
         return default
 
 
+def stdin_is_terminal() -> bool:
+    """
+    True when a person can type at stdin. On Windows isatty() is also true
+    for the NUL device, so ask the console API whether it's a real console.
+    """
+    try:
+        if not sys.stdin or not sys.stdin.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        import msvcrt
+        mode = ctypes.c_uint()
+        handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except Exception:
+        return False
+
+
 def _interactive() -> bool:
     try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
+        return stdin_is_terminal() and sys.stdout.isatty()
     except (AttributeError, ValueError):
         return False
 

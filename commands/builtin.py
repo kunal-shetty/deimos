@@ -37,6 +37,9 @@ class ResumeCommand(Command):
         if not target_id:
             state.ui.error("Usage: /resume <conversation_id>  (run /chats to see ids)")
             return
+        if not state.agent.memory.enabled:
+            state.ui.info("Long-term memory is off, so there are no saved conversations to resume.")
+            return
         state.shutdown_current_agent()
         try:
             memory = MemoryManager(user_id=state.agent.memory.user_id, resume_id=target_id)
@@ -132,6 +135,9 @@ class DeleteCommand(Command):
         target_id = args.strip()
         if not target_id:
             state.ui.error("Usage: /delete <conversation_id>")
+            return
+        if not state.agent.memory.enabled:
+            state.ui.info("Long-term memory is off, so there are no saved conversations.")
             return
         if target_id == state.agent.memory.conversation_id:
             state.ui.error("Cannot delete the conversation currently in progress.")

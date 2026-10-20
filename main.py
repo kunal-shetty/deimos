@@ -3,20 +3,24 @@
 Deimos — Autonomous Coding Agent
 
 Usage:
-  deimos assemble [--verbose] [--no-plan]
-  deimos dashboard [--port PORT]
+  deimos [--verbose] [--no-plan] [--mode MODE]     start the agent (same as `deimos assemble`)
+  deimos setup                                     enter or change API keys (~/.deimos/.env)
+  deimos update                                    update to the latest version
+  deimos dashboard [--port PORT]                   launch the local web dashboard
 
 Type / in the prompt to see all available in-session commands.
 """
 
 import sys
 import os
+import json
 import argparse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import PROMPTS_DIR, DEIMOS_USER_ID, PLAN_MODE_DEFAULT, DASHBOARD_HOST, DASHBOARD_PORT, LLM_MODEL, CONTEXT_SAFE_LIMIT
+from config import (PROMPTS_DIR, DEIMOS_USER_ID, PLAN_MODE_DEFAULT, DASHBOARD_HOST, DASHBOARD_PORT,
+                    LLM_MODEL, LLM_API_KEY, CONTEXT_SAFE_LIMIT, ROOT_DIR, SUPABASE_URL, SUPABASE_KEY)
 from agent.core import Agent
 from agent.permissions import MODES, Permissions
 from settings import load_settings
@@ -24,7 +28,11 @@ from llm.client import LLMClient
 from tools.registry import ToolRegistry
 from ui.terminal import TerminalUI
 from memory.manager import MemoryManager
+from memory.null import NullMemory
 from commands import build_registry, AppState
+
+REPO_ZIP = "https://github.com/kunal-shetty/deimos/archive/refs/heads/main.zip"
+SUBCOMMANDS = ("assemble", "dashboard", "update", "setup")
 
 
 def load_system_prompt() -> str:
@@ -34,8 +42,22 @@ def load_system_prompt() -> str:
     return base + f"\n\n## Current working directory\n{cwd}\nAll relative file paths refer to this directory."
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Deimos — Autonomous Coding Agent", add_help=False)
+def _version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("deimos")
+    except Exception:
+        return "dev"
+
+
+def parse_args(argv: list[str] | None = None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # `deimos` on its own (or with only assemble's flags) starts the agent
+    if not argv or (argv[0] not in SUBCOMMANDS and argv[0] not in ("-h", "--help", "--version")):
+        argv.insert(0, "assemble")
+
+    parser = argparse.ArgumentParser(prog="deimos", description="Deimos — Autonomous Coding Agent")
+    parser.add_argument("--version", action="version", version=f"deimos {_version()}")
     subparsers = parser.add_subparsers(dest="command")
 
     assemble = subparsers.add_parser("assemble", help="Start the Deimos agent")
@@ -47,46 +69,76 @@ def parse_args():
     dashboard = subparsers.add_parser("dashboard", help="Launch the local web dashboard")
     dashboard.add_argument("--port", type=int, default=DASHBOARD_PORT)
 
-    update = subparsers.add_parser("update", help="Update Deimos to the latest version")
+    subparsers.add_parser("update", help="Update Deimos to the latest version")
+    subparsers.add_parser("setup", help="Enter or change API keys (saved to ~/.deimos/.env)")
 
-    args = parser.parse_args()
-    if args.command is None:
-        parser.print_help()
-        sys.exit(0)
-    return args
+    return parser.parse_args(argv)
 
 
 def run_update():
+    """
+    Update the copy of Deimos that is running. A git checkout pulls and
+    reinstalls itself; an installed copy reinstalls from the latest source
+    on GitHub into the same environment.
+    """
     import subprocess
-    import sys
-    from pathlib import Path
 
-    print("Updating Deimos...")
+    pip = [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check"]
+    steps = []
+    if (ROOT_DIR / ".git").exists():
+        print(f"Updating the git checkout at {ROOT_DIR}...")
+        steps.append(["git", "-C", str(ROOT_DIR), "pull", "--ff-only"])
+        steps.append(pip + ["-e", str(ROOT_DIR)])
+    else:
+        print("Downloading the latest Deimos from GitHub...")
+        steps.append(pip + ["--upgrade", "--force-reinstall", "--no-deps", f"deimos @ {REPO_ZIP}"])
+        steps.append(pip + [f"deimos @ {REPO_ZIP}"])  # picks up any new dependencies
 
-    # Use the current python executable to find the correct pip
-    # This works regardless of OS or venv location
-    pip_exe = sys.executable.replace("python", "pip") if "python" in sys.executable else None
-
-    # Fallback: try to find pip in the current environment
-    if not pip_exe:
-        try:
-            pip_exe = subprocess.check_output(["which", "pip"], text=True).strip()
-        except:
-            pip_exe = "pip"
+    if os.name == "nt":
+        # Windows won't let pip replace deimos.exe while this process is running
+        # from it, so a helper finishes the update after we exit.
+        subprocess.Popen([sys.executable, "-c", _WINDOWS_UPDATER, str(os.getpid()), json.dumps(steps)])
+        print("Finishing the update after this command exits...")
+        return
 
     try:
-        # If we are in a git repo, pull changes first
-        subprocess.run(["git", "pull"], capture_output=True)
-
-        # Update the package using the current environment's pip
-        subprocess.run([pip_exe, "install", "--upgrade", "."], check=True)
-        print("Deimos updated successfully!")
-    except subprocess.CalledProcessError as e:
-        print(f"Update failed during pip install: {e}")
-        sys.exit(1)
-    except Exception as e:
+        for step in steps:
+            subprocess.run(step, check=True)
+    except (subprocess.CalledProcessError, OSError) as e:
         print(f"Update failed: {e}")
+        print("You can also re-run the install script, which updates an existing install.")
         sys.exit(1)
+    print("Deimos is up to date. Restart any running sessions to use the new version.")
+
+
+_WINDOWS_UPDATER = r"""
+import ctypes, json, subprocess, sys, time
+pid, steps = int(sys.argv[1]), json.loads(sys.argv[2])
+handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+if handle:
+    ctypes.windll.kernel32.WaitForSingleObject(handle, 60000)
+    ctypes.windll.kernel32.CloseHandle(handle)
+time.sleep(1.5)  # let the deimos.exe launcher that started us exit too
+for step in steps:
+    if subprocess.run(step).returncode != 0:
+        print("\nDeimos update failed. Close any running Deimos sessions and run `deimos update` again,")
+        print("or re-run the install script.")
+        sys.exit(1)
+print("\nDeimos is up to date.")
+"""
+
+
+def open_memory(ui, user_id, resume_id=None):
+    """Long-term memory when Supabase is configured and reachable, otherwise memory off."""
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return NullMemory("Supabase is not configured")
+    if not user_id:
+        return NullMemory("DEIMOS_USER_ID is not set")
+    try:
+        return MemoryManager(user_id=user_id, resume_id=resume_id)
+    except Exception as e:
+        ui.error(f"Long-term memory is unavailable, continuing without it: {e}")
+        return NullMemory(str(e))
 
 
 def run_dashboard(port: int):
@@ -96,7 +148,7 @@ def run_dashboard(port: int):
 
 
 def build_agent(ui, llm, tools, system_prompt, plan_mode, user_id, permissions, resume_id=None) -> Agent:
-    memory = MemoryManager(user_id=user_id, resume_id=resume_id)
+    memory = open_memory(ui, user_id, resume_id)
     return Agent(ui=ui, llm=llm, tools=tools, system_prompt=system_prompt, memory=memory,
                  plan_mode=plan_mode, permissions=permissions)
 
@@ -121,6 +173,22 @@ def main():
     if args.command == "update":
         run_update()
         return
+    if args.command == "setup":
+        from commands.setup import run_setup
+        sys.exit(0 if run_setup() else 1)
+
+    if not LLM_API_KEY:
+        from commands.setup import run_setup
+        from ui.terminal import stdin_is_terminal
+        if not stdin_is_terminal():
+            print("Deimos needs a Groq API key. Run `deimos setup` in a terminal to add one.")
+            sys.exit(1)
+        print("Welcome to Deimos. Let's add your API keys first.\n")
+        if not run_setup():
+            sys.exit(1)
+        # Restart so the new keys are picked up by the config loaded at import
+        import subprocess
+        sys.exit(subprocess.call([sys.executable, "-m", "main", *sys.argv[1:]]))
 
     ui = TerminalUI(verbose=getattr(args, "verbose", False))
     permissions = Permissions(ui, mode=args.mode or load_settings()["permission_mode"])
@@ -140,14 +208,6 @@ def main():
         if auth.is_authenticated():
             # We are authenticated via OAuth, so we can override the missing .env ID
             user_id = auth.get_user_id()
-        else:
-            ui.error(
-                "DEIMOS_USER_ID is not set in .env and you are not logged in. "
-                "Please run '/login' (if available) or set the ID in .env."
-            )
-            # Instead of exiting, let's check if we can allow the user to run /login
-            # by falling through to the input loop if we modify main()
-            # sys.exit(1)
 
     plan_mode = PLAN_MODE_DEFAULT and not getattr(args, "no_plan", False)
 
@@ -163,6 +223,8 @@ def main():
         sys.exit(1)
 
     state = AppState(ui=ui, llm=llm, tools=tools, system_prompt=system_prompt, agent=agent)
+    if not agent.memory.enabled:
+        ui.info(f"Long-term memory is off ({agent.memory.reason}). Run `deimos setup` to connect Supabase.")
 
     # Enable slash-command completion and the status bar before the first prompt
     ui.setup_input(registry.names_with_descriptions())

@@ -12,6 +12,8 @@ from memory.active import score_message_async
 class MemoryManager:
     """Top-level memory coordinator for a single user session."""
 
+    enabled = True
+
     def __init__(self, user_id: str, resume_id: str | None = None):
         # Validate database schema before initializing stores
         missing = validate_schema()

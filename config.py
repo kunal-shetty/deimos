@@ -2,11 +2,17 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
-
 # Paths
 ROOT_DIR = Path(__file__).parent
 PROMPTS_DIR = ROOT_DIR / "prompts"
+LOCAL_DIR = Path.home() / ".deimos"
+ENV_FILE = LOCAL_DIR / ".env"  # written by `deimos setup`
+
+# Settings come from the environment first, then a .env next to the source
+# (a development checkout), then ~/.deimos/.env (an installed copy).
+# load_dotenv never overrides a variable that is already set.
+load_dotenv(ROOT_DIR / ".env")
+load_dotenv(ENV_FILE)
 
 # LLM
 LLM_API_KEY = os.getenv("GROQ_API_KEY")
@@ -33,7 +39,6 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 DEIMOS_USER_ID = os.getenv("DEIMOS_USER_ID")  # uuid of the row in `users` table
 
 # Local files (input history, etc — not synced to Supabase)
-LOCAL_DIR = Path.home() / ".deimos"
 INPUT_HISTORY_FILE = LOCAL_DIR / "input_history"
 MODEL_FILE = LOCAL_DIR / "model.txt"
 

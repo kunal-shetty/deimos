@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deimos"
-version = "0.1.0"
+version = "0.2.0"
+description = "An autonomous coding agent for your terminal"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "requests>=2.31.0",
@@ -16,14 +18,22 @@ dependencies = [
     "beautifulsoup4>=4.12.0",
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.20.0",
     "typesafe-sdk>=0.7.5,<0.8",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0.0", "pytest-asyncio>=0.20.0"]
+
+[project.urls]
+Homepage = "https://github.com/kunal-shetty/deimos"
 
 [project.scripts]
 deimos = "main:main"
 
 [tool.setuptools]
 py-modules = ["main", "config", "settings"]
-packages = ["agent", "tools", "llm", "ui", "memory", "commands", "web", "auth"]
+packages = ["agent", "tools", "llm", "ui", "memory", "commands", "web", "auth", "prompts", "skills"]
+
+[tool.setuptools.package-data]
+prompts = ["*.txt", "*.md"]
+skills = ["**/*"]

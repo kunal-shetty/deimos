@@ -4,68 +4,90 @@ This guide will walk you through setting up Deimos on your local machine.
 
 ## Prerequisites
 
-- **Python 3.11+**: Ensure you have Python installed.
-- **Git**: Required for version control and updating Deimos.
-- **Supabase Account**: Deimos uses Supabase for its long-term memory system.
-- **Tavily API Key**: Required for web search capabilities.
-- **LLM API Key**: A Groq API key (or other supported provider) for the core intelligence.
+- **Python 3.11+** from [python.org](https://www.python.org/downloads/). On Windows, tick
+  "Add python.exe to PATH" in the installer.
+- **A Groq API key** from [console.groq.com/keys](https://console.groq.com/keys).
+- Optional: a **Tavily** key (web search), a **TypeSafe** key (Jev decisions), and a
+  **Supabase** project (long-term memory).
 
-## 1. Quick Install (Unix/Bash)
+## 1. Install
 
-If you are on Linux, macOS, or using Git Bash/WSL on Windows, you can install Deimos with a single command:
+**macOS, Linux, WSL**
 
 ```bash
-curl -sSL https://deimos.sh/install | sh
+curl -fsSL https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.sh | sh
 ```
 
-This script creates a private virtual environment in `~/.deimos/venv` and symlinks the `deimos` command to your path.
+**Windows (PowerShell)**
 
-## 2. Manual Installation (Windows/PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.ps1 | iex
+```
 
-If you prefer to install manually on Windows:
+The installer:
 
-1. **Clone the repository**:
-   ```powershell
-   git clone https://github.com/your-repo/deimos.git
-   cd deimos
-   ```
+1. finds Python 3.11 or newer,
+2. creates a private environment in `~/.deimos/venv` (so nothing touches your other Python projects),
+3. installs the latest Deimos from GitHub into it, and
+4. adds a `deimos` command to your PATH: a link in `~/.local/bin` on macOS/Linux, or
+   `%USERPROFILE%\.deimos\bin` on Windows. Only `deimos` is added, not the environment's
+   `python` or `pip`.
 
-2. **Create a virtual environment**:
-   ```powershell
-   python -m venv .venv
-   .\.venv\Scripts\activate
-   ```
+Open a new terminal afterwards so the command is found. Running the installer again updates an
+existing install. Options (set as environment variables before running it): `DEIMOS_REF` to install
+another branch, `DEIMOS_HOME` to change the install folder, `DEIMOS_NO_MODIFY_PATH=1` to leave your
+PATH alone.
 
-3. **Install dependencies**:
-   ```powershell
-   pip install .
-   ```
+**Update:** `deimos update`. **Uninstall:** delete `~/.deimos` and the `deimos` command
+(`~/.local/bin/deimos`, or remove `%USERPROFILE%\.deimos\bin` from your user PATH on Windows).
 
-## 3. Environment Configuration
+## 2. Configuration
 
-Create a `.env` file in the root directory:
+The first time you run `deimos` it asks for your keys and saves them to `~/.deimos/.env`.
+Change them later with `deimos setup`. Keys are read from, in order of priority:
+
+1. environment variables,
+2. a `.env` next to the source (for a development checkout),
+3. `~/.deimos/.env`.
+
+All settings:
 
 ```env
-# LLM Config
+# Required
 GROQ_API_KEY=your_groq_api_key
-LLM_MODEL=llama-3.3-70b-versatile
 
-# Supabase Config
+# Optional features
+TAVILY_API_KEY=your_tavily_api_key        # web search
+TYPESAFE_API_KEY=your_typesafe_api_key    # Jev structured decisions (falls back to Groq)
+
+# Optional long-term memory (see section 4)
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-anon-key
 DEIMOS_USER_ID=your-user-uuid
 
-# Web Search
-TAVILY_API_KEY=your_tavily_api_key
-
-# Agent Settings
+# Optional tuning
+LLM_MODEL=openai/gpt-oss-120b
+LLM_MODEL_FAST=openai/gpt-oss-20b
 MAX_ITERATIONS=30
 PLAN_MODE_DEFAULT=true
 ```
 
-## 4. Supabase Database Setup
+Behaviour settings (permission mode, tool output limit, hooks) live in `~/.deimos/settings.json`
+or a project's `.deimos/settings.json`; see the [User Guide](user_guide.md).
 
-Deimos requires a specific schema to manage its episodic and semantic memory. Run the following SQL in your Supabase SQL Editor:
+## 3. Developing Deimos
+
+```bash
+git clone https://github.com/kunal-shetty/deimos && cd deimos
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+In a git checkout, `deimos update` pulls and reinstalls the checkout instead of downloading.
+
+## 4. Supabase Database Setup (optional)
+
+Long-term memory needs a Supabase project with the following schema. Without it, Deimos runs with memory off. Run the following SQL in your Supabase SQL Editor:
 
 ```sql
 -- Users Table
@@ -141,7 +163,7 @@ CREATE TABLE archive_memories (
 Once installed and configured, you can start the agent:
 
 ```bash
-deimos assemble
+deimos
 ```
 
 To launch the monitoring dashboard:

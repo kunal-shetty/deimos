@@ -15,32 +15,48 @@
 
 Deimos is a terminal-based AI agent that thinks, plans, and executes code changes in your workspace.
 
-### 1. Quick Install (Unix/Bash/WSL)
+### 1. Install
+
+You need Python 3.11 or newer. Then run one line:
+
+**macOS, Linux, WSL**
 ```bash
-curl -sSL https://deimos.sh/install | sh
+curl -fsSL https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.sh | sh
 ```
 
-### 2. Manual Install (Windows/PowerShell)
+**Windows (PowerShell)**
 ```powershell
-git clone https://github.com/kunal-shetty/deimos
-cd deimos
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install .
+irm https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.ps1 | iex
 ```
 
-### 3. Configuration
-Create a `.env` file in the root directory:
-```env
-GROQ_API_KEY=your_groq_api_key
-TAVILY_API_KEY=your_tavily_api_key
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-anon-key
-DEIMOS_USER_ID=your-user-uuid
-```
+The installer puts Deimos in its own environment under `~/.deimos` and adds a `deimos` command
+to your PATH. Open a new terminal afterwards, then run `deimos` in any project folder.
 
-### 4. Database Setup
-Deimos requires a Supabase instance for its memory. Please run the setup SQL provided in the [Installation Guide](docs/installation.md).
+### 2. Add your keys
+
+The first run asks for your [Groq API key](https://console.groq.com/keys) and saves it to
+`~/.deimos/.env`. Run `deimos setup` any time to add or change keys:
+
+| Key | Needed for |
+|---|---|
+| `GROQ_API_KEY` | Required: the model behind Deimos |
+| `TAVILY_API_KEY` | Web search (optional) |
+| `TYPESAFE_API_KEY` | Jev structured decisions; falls back to Groq without it (optional) |
+| `SUPABASE_URL`, `SUPABASE_KEY`, `DEIMOS_USER_ID` | Long-term memory across sessions (optional) |
+
+### 3. Long-term memory (optional)
+
+Without Supabase, Deimos works normally but forgets everything when a session ends. To keep
+memory between sessions, create a Supabase project, run the setup SQL from the
+[Installation Guide](docs/installation.md), and add its details with `deimos setup`.
+
+### Developing Deimos
+```bash
+git clone https://github.com/kunal-shetty/deimos && cd deimos
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+A `.env` in the checkout is read too, so you can keep development keys there.
 
 ---
 
@@ -56,11 +72,15 @@ Deimos requires a Supabase instance for its memory. Please run the setup SQL pro
 ## Basic Usage
 
 ```bash
-# Start the agent
-deimos assemble
+# Start the agent (same as `deimos assemble`)
+deimos
 
-# Start with verbose tool output
-deimos assemble --verbose
+# Start with verbose tool output, or in a permission mode
+deimos --verbose
+deimos --mode auto-edit
+
+# Add or change API keys
+deimos setup
 
 # Launch the monitoring dashboard
 deimos dashboard
