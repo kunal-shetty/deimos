@@ -179,7 +179,7 @@ class MemoryManager:
         client = LLMClient()
         prompt = f"Summarize the following conversation segment concisely, preserving key decisions and technical facts:\n\n{full_text}"
 
-        res = client.complete(system="You are a memory compression engine. Be concise and factual.", messages=[{"role": "user", "content": prompt}])
+        res = client.complete(system="You are a memory compression engine. Be concise and factual.", messages=[{"role": "user", "content": prompt}], tools=[])
         return res.get("text")
 
     def list_conversations(self, limit: int = 20) -> list[dict]:

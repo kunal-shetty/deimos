@@ -91,8 +91,8 @@ def run_dashboard(port: int):
     uvicorn.run("web.dashboard:app", host=DASHBOARD_HOST, port=port)
 
 
-def build_agent(ui, llm, tools, system_prompt, plan_mode, resume_id=None) -> Agent:
-    memory = MemoryManager(user_id=DEIMOS_USER_ID, resume_id=resume_id)
+def build_agent(ui, llm, tools, system_prompt, plan_mode, user_id, resume_id=None) -> Agent:
+    memory = MemoryManager(user_id=user_id, resume_id=resume_id)
     return Agent(ui=ui, llm=llm, tools=tools, system_prompt=system_prompt, memory=memory, plan_mode=plan_mode)
 
 
@@ -114,13 +114,14 @@ def main():
         plan_mode=PLAN_MODE_DEFAULT and not getattr(args, "no_plan", False),
     )
 
-    if not DEIMOS_USER_ID:
+    user_id = DEIMOS_USER_ID
+    if not user_id:
         # Use AuthManager if available to check login state instead of just .env
         from auth.manager import AuthManager
         auth = AuthManager()
         if auth.is_authenticated():
             # We are authenticated via OAuth, so we can override the missing .env ID
-            DEIMOS_USER_ID = auth.get_user_id()
+            user_id = auth.get_user_id()
         else:
             ui.error(
                 "DEIMOS_USER_ID is not set in .env and you are not logged in. "
@@ -138,7 +139,7 @@ def main():
         llm = LLMClient()
         tools = ToolRegistry()
         system_prompt = load_system_prompt()
-        agent = build_agent(ui, llm, tools, system_prompt, plan_mode)
+        agent = build_agent(ui, llm, tools, system_prompt, plan_mode, user_id)
     except Exception as e:
         ui.error(f"Failed to initialize Deimos: {e}")
         sys.exit(1)

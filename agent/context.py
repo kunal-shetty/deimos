@@ -8,13 +8,29 @@ class Context:
     """Manages the conversation message history for the agent loop."""
 
     def __init__(self, system_prompt: str):
-        self.system_prompt = system_prompt
+        self._base_system = system_prompt
+        # Named blocks appended to the system prompt and replaced on every
+        # update (git state, workflow status) so they never pile up in history.
+        self._transient: dict[str, str] = {}
         self._messages: list[dict] = []
+
+    @property
+    def system_prompt(self) -> str:
+        if not self._transient:
+            return self._base_system
+        return self._base_system + "".join(f"\n\n{block}" for block in self._transient.values())
+
+    def set_transient(self, key: str, block: str | None):
+        """Set (or clear, with None/empty) a named block on the system prompt."""
+        if block:
+            self._transient[key] = block
+        else:
+            self._transient.pop(key, None)
 
     def add_user(self, content: str | list):
         self._messages.append({"role": "user", "content": content})
 
-    def add_assistant(self, content: str | list):
+    def add_assistant(self, content: str | list | dict):
         self._messages.append({"role": "assistant", "content": content})
 
     def add_tool_result(self, tool_use_id: str, result: str):
@@ -64,21 +80,21 @@ class Context:
 
         while self.estimated_tokens > limit_tokens and self._messages:
             unit_end = 1
-            msg = self._messages[0]
+            tool_call_count = _count_tool_calls(self._messages[0])
 
-            if msg["role"] == "assistant" and isinstance(msg["content"], list):
-                has_tool_calls = any(item.get("type") == "tool_use" for item in msg["content"] if isinstance(item, dict))
-                if has_tool_calls:
-                    tool_call_count = sum(1 for item in msg["content"] if isinstance(item, dict) and item.get("type") == "tool_use")
-                    results_found = 0
-                    for i in range(1, len(self._messages)):
-                        if self._messages[i]["role"] == "user" and isinstance(self._messages[i]["content"], list):
-                            results_found += sum(1 for item in self._messages[i]["content"] if isinstance(item, dict) and item.get("type") == "tool_result")
-                            if results_found >= tool_call_count:
-                                unit_end = i + 1
-                                break
-                    else:
-                        unit_end = len(self._messages)
+            if tool_call_count:
+                results_found = 0
+                for i in range(1, len(self._messages)):
+                    results_found += _count_tool_results(self._messages[i])
+                    if results_found >= tool_call_count:
+                        unit_end = i + 1
+                        break
+                else:
+                    unit_end = len(self._messages)
+
+            # Never leave an orphaned tool result at the head of the history
+            while unit_end < len(self._messages) and _count_tool_results(self._messages[unit_end]):
+                unit_end += 1
 
             removed.extend(self._messages[:unit_end])
             self._messages = self._messages[unit_end:]
@@ -87,3 +103,22 @@ class Context:
 
     def reset(self):
         self._messages = []
+        self._transient = {}
+
+
+def _count_tool_calls(msg: dict) -> int:
+    """Count tool calls in an assistant message (OpenAI dict or Anthropic blocks)."""
+    if msg["role"] != "assistant":
+        return 0
+    content = msg["content"]
+    if isinstance(content, dict):
+        return len(content.get("tool_calls") or [])
+    if isinstance(content, list):
+        return sum(1 for item in content if isinstance(item, dict) and item.get("type") == "tool_use")
+    return 0
+
+
+def _count_tool_results(msg: dict) -> int:
+    if msg["role"] != "user" or not isinstance(msg["content"], list):
+        return 0
+    return sum(1 for item in msg["content"] if isinstance(item, dict) and item.get("type") == "tool_result")

@@ -5,7 +5,6 @@ import time
 
 import requests
 from config import MAX_ITERATIONS, DASHBOARD_HOST, DASHBOARD_PORT
-import re
 from agent.context import Context
 from agent.planner import Planner, StepStatus, AnalysisResult
 from llm.client import LLMClient
@@ -133,9 +132,21 @@ class Agent:
             if log:
                 git_block += f"- Recent Log:\n{log}"
 
-            self.ctx.add_assistant(f"[System: {git_block}]")
+            self.ctx.set_transient("git", git_block)
         except Exception:
-            pass # Not a git repo or git not installed
+            self.ctx.set_transient("git", None)  # Not a git repo or git not installed
+
+    def _inject_workflow_status(self):
+        """Expose the active plan (and how to report progress) as a transient system block."""
+        if not self.active_plan:
+            self.ctx.set_transient("workflow", None)
+            return
+        self.ctx.set_transient("workflow", (
+            "## Current Workflow Status\n"
+            f"{self.active_plan.to_markdown()}\n"
+            "Work through the steps in dependency order. When you finish a step, "
+            "write `[Step <id> completed]` (e.g. `[Step s1 completed]`) on its own line."
+        ))
 
     def run(self, user_input: str):
         start_time = time.time()
@@ -149,9 +160,7 @@ class Agent:
         self.memory.save_message("user", user_input)
 
         # If we have an active plan, inject its current state into the context
-        if self.active_plan:
-            workflow_status = f"\n\n## Current Workflow Status\n{self.active_plan.to_markdown()}"
-            self.ctx.add_assistant(f"[System: {workflow_status}]")
+        self._inject_workflow_status()
 
         # --- Context Window Management ---
         removed_msgs = self.ctx.truncate()
@@ -202,8 +211,10 @@ class Agent:
                     self.active_plan.status = "completed"
                     self.planner.save(self.active_plan)
                     self.ui.info("Workflow complete! All steps finished.")
+                    self.active_plan = None
                 else:
                     self.planner.save(self.active_plan)
+                self._inject_workflow_status()
 
             if response["stop_reason"] == "end_turn" or not response["tool_calls"]:
                 if not self._streamed:
@@ -241,22 +252,23 @@ class Agent:
                 while result.startswith("Error:") and retries < 3:
                     self.ui.info(f"Self-healing: Tool {call['name']} failed. Attempting fix {retries+1}/3...")
 
-                    # Trigger a quick "fix" turn from the LLM
-                    fix_prompt = f"The tool {call['name']} failed with error: {result}. The inputs were {call['inputs']}. Please provide corrected inputs in JSON format."
-                    fix_res = self.llm.complete(
-                        system=self.ctx.system_prompt,
-                        messages=self.ctx.messages + [{"role": "user", "content": fix_prompt}],
-                        tools=[]
+                    # Ask for corrected inputs in a standalone request: the main history
+                    # still has this tool call unanswered, which the API would reject.
+                    tool = self.tools.get(call["name"])
+                    fix_prompt = (
+                        f"The tool `{call['name']}` failed with error: {result}\n"
+                        f"Inputs used: {json.dumps(call['inputs'])}\n"
+                        f"Input schema: {json.dumps(tool.input_schema) if tool else 'unknown'}\n"
+                        "Respond with corrected inputs as a JSON object matching the schema."
                     )
-
                     try:
-                        # Assume the LLM provides the new inputs as JSON in the text
-                        raw = (fix_res.get("text") or "").strip()
-                        if raw.startswith("```"):
-                            raw = re.sub(r"^```(?:json)?\n?", "", raw)
-                            raw = re.sub(r"\n?```$", "", raw)
-                        new_inputs = json.loads(raw)
-                        result = self.tools.dispatch(call["name"], new_inputs)
+                        new_inputs = self.llm.complete_json(
+                            system="You repair failed tool calls for an autonomous coding agent.",
+                            messages=[{"role": "user", "content": fix_prompt}],
+                        )
+                        if new_inputs and "error" not in new_inputs:
+                            call["inputs"] = new_inputs
+                            result = self.tools.dispatch(call["name"], new_inputs)
                     except Exception:
                         pass  # fall through to the retry counter below
 

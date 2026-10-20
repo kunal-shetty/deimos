@@ -9,7 +9,6 @@ from commands.base import Command, AppState
 from agent.core import Agent
 from memory.manager import MemoryManager
 from memory.conversation import ConversationStore
-from config import DEIMOS_USER_ID
 
 
 class HelpCommand(Command):
@@ -40,7 +39,7 @@ class ResumeCommand(Command):
             return
         state.shutdown_current_agent()
         try:
-            memory = MemoryManager(user_id=DEIMOS_USER_ID, resume_id=target_id)
+            memory = MemoryManager(user_id=state.agent.memory.user_id, resume_id=target_id)
             state.agent = Agent(ui=state.ui, llm=state.llm, tools=state.tools,
                                 system_prompt=state.system_prompt, memory=memory,
                                 plan_mode=state.agent.plan_mode)
@@ -137,7 +136,7 @@ class DeleteCommand(Command):
             state.ui.error("Cannot delete the conversation currently in progress.")
             return
         try:
-            store = ConversationStore(user_id=DEIMOS_USER_ID)
+            store = ConversationStore(user_id=state.agent.memory.user_id)
             ok = store.delete_conversation(target_id)
             state.ui.info(f"Deleted conversation {target_id}." if ok else f"No conversation found with id {target_id}.")
         except Exception as e:

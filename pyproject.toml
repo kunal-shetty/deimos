@@ -25,4 +25,4 @@ deimos = "main:main"
 
 [tool.setuptools]
 py-modules = ["main", "config"]
-packages = ["agent", "tools", "llm", "ui", "memory", "commands", "web"]
+packages = ["agent", "tools", "llm", "ui", "memory", "commands", "web", "auth"]
