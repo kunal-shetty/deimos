@@ -34,6 +34,10 @@ class EpisodicMemory:
         summary = _call_llm(EPISODIC_SUMMARY_PROMPT, transcript, max_tokens=700)
         if not summary:
             return
+        self.save_summary(conversation_id, summary)
+
+    def save_summary(self, conversation_id: str | None, summary: str):
+        """Store a summary and roll older summaries up into archives when due."""
         self.client.table("episodic_memories").insert({
             "user_id": self.user_id, "conversation_id": conversation_id, "summary": summary,
         }).execute()

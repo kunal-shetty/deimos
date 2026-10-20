@@ -255,6 +255,53 @@ class PlanRejectCommand(Command):
         state.agent._resolve_pending_plan("/plan-reject")
 
 
+# ── Project instructions ─────────────────────────────────────────────────────
+
+INIT_PROMPT = (
+    "Create a DEIMOS.md file in the current working directory: instructions that "
+    "future sessions of you (an autonomous coding agent) will load into the system "
+    "prompt when working in this project. First explore the repository with your "
+    "tools: list the top-level layout, read the README and build/package files "
+    "(pyproject.toml, package.json, Makefile, etc.), and skim the main entry points. "
+    "Then write DEIMOS.md with short sections covering: what the project is; how to "
+    "install, run, build, test and lint it (exact commands); the code layout and "
+    "where key logic lives; coding conventions you observed; and anything to be "
+    "careful about. Keep it under ~80 lines, factual, and specific to this repo — "
+    "no generic advice. Only state commands you found evidence for."
+)
+
+
+class InitCommand(Command):
+    name = "init"
+    description = "Explore this project and write a DEIMOS.md for future sessions"
+    usage = "/init [--force]"
+    def run(self, args, state):
+        from agent.instructions import INSTRUCTIONS_FILE
+        path = os.path.join(os.getcwd(), INSTRUCTIONS_FILE)
+        if os.path.exists(path) and "--force" not in args.split():
+            state.ui.info(f"{INSTRUCTIONS_FILE} already exists here. Use /init --force to regenerate it.")
+            return
+        state.agent.run(INIT_PROMPT)
+        if os.path.exists(path) and state.agent.reload_instructions():
+            state.ui.info(f"Loaded {INSTRUCTIONS_FILE} into this session.")
+        else:
+            state.ui.error(f"{INSTRUCTIONS_FILE} was not created.")
+
+
+class InstructionsCommand(Command):
+    name = "instructions"
+    description = "List the DEIMOS.md files loaded into this session"
+    def run(self, args, state):
+        from agent.instructions import instruction_files
+        state.agent.reload_instructions()
+        files = instruction_files()
+        if not files:
+            state.ui.info("No DEIMOS.md files found. Run /init to create one for this project.")
+            return
+        for f in files:
+            state.ui.info(f"• {f}")
+
+
 # ── Dashboard command ────────────────────────────────────────────────────────
 
 class DashboardCommand(Command):
@@ -286,6 +333,7 @@ def build_registry():
         MemoryCommand, ProjectsCommand, ProjectCommand, TitleCommand, DeleteCommand,
         StatusCommand, ModelCommand, VerboseCommand, ClearScreenCommand,
         PlanCommand, PlansCommand, PlanRejectCommand, DashboardCommand,
+        InitCommand, InstructionsCommand,
     ]:
         registry.register(cmd_cls())
     global REGISTRY

@@ -1,3 +1,6 @@
+import os
+import re
+import time
 from typing import Optional
 from .base import BaseTool
 from .read_file import ReadFileTool
@@ -82,8 +85,63 @@ class ToolRegistry:
             return f"Error: Unknown tool '{name}'"
         inputs = inputs or {}
         try:
-            return tool.run(**inputs)
+            result = tool.run(**inputs)
         except TypeError as e:
             return f"Error: Bad tool inputs for '{name}': {e}"
         except Exception as e:
             return f"Error running tool '{name}': {e}"
+        return limit_output(name, result if isinstance(result, str) else str(result))
+
+
+OUTPUT_DIR_NAME = os.path.join(".deimos", "outputs")
+KEEP_OUTPUT_FILES = 50
+
+
+def limit_output(tool_name: str, result: str, limit: int | None = None, cwd: str | None = None) -> str:
+    """
+    Keep tool results from flooding the context window. Results longer than
+    the limit keep their head and tail inline; the full text is saved under
+    .deimos/outputs/ so the agent can page through it with read_file.
+    """
+    if limit is None:
+        from settings import load_settings
+        limit = int(load_settings()["tool_output_limit"])
+    if limit <= 0 or len(result) <= limit:
+        return result
+
+    path = _save_full_output(tool_name, result, cwd)
+    head = result[: int(limit * 0.6)]
+    tail = result[-int(limit * 0.4):]
+    omitted = len(result) - len(head) - len(tail)
+    where = (
+        f"Full output ({result.count(chr(10)) + 1} lines) saved to {path}; "
+        "use read_file with offset/limit to view specific lines."
+        if path else "Full output could not be saved."
+    )
+    return f"{head}\n\n[... {omitted} characters omitted. {where} ...]\n\n{tail}"
+
+
+def _save_full_output(tool_name: str, result: str, cwd: str | None) -> str | None:
+    try:
+        out_dir = os.path.join(cwd or os.getcwd(), OUTPUT_DIR_NAME)
+        os.makedirs(out_dir, exist_ok=True)
+        safe = re.sub(r"[^A-Za-z0-9_-]", "_", tool_name)
+        path = os.path.join(out_dir, f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 1_000_000:06d}-{safe}.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(result)
+        _prune(out_dir)
+        return os.path.relpath(path, cwd or os.getcwd())
+    except OSError:
+        return None
+
+
+def _prune(out_dir: str):
+    files = sorted(
+        (os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.endswith(".txt")),
+        key=os.path.getmtime,
+    )
+    for old in files[:-KEEP_OUTPUT_FILES]:
+        try:
+            os.remove(old)
+        except OSError:
+            pass

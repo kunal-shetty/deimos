@@ -145,42 +145,61 @@ class MemoryManager:
 
     # ── Conversation helpers ─────────────────────────────────────────────────
 
-    def summarize_segment(self, messages: list[dict]) -> str | None:
+    SEGMENT_ITEM_CHARS = 1500     # per message / tool result in the transcript
+    SEGMENT_TOTAL_CHARS = 60000   # whole transcript sent to the fast model
+
+    def summarize_segment(self, messages: list[dict], prior_summary: str | None = None) -> str | None:
         """
-        Summarize a block of messages into a concise narrative for long-term storage.
-        Uses the underlying LLM client to generate the summary.
+        Summarize a block of trimmed messages, merged with the summary of any
+        earlier trimmed blocks, so the session keeps one rolling summary.
         """
         if not messages:
             return None
 
-        # Convert message list to a readable transcript
+        def clip(text) -> str:
+            text = str(text or "")
+            return text if len(text) <= self.SEGMENT_ITEM_CHARS else text[:self.SEGMENT_ITEM_CHARS] + " [...]"
+
         transcript = []
         for m in messages:
-            role = m["role"]
             content = m["content"]
-            if isinstance(content, list):
-                text_parts = []
+            if isinstance(content, dict):  # assistant turn in OpenAI format
+                parts = [clip(content.get("content"))] if content.get("content") else []
+                for tc in content.get("tool_calls") or []:
+                    fn = tc.get("function", {})
+                    parts.append(f"[Tool Call {fn.get('name')}]: {clip(fn.get('arguments'))}")
+                content = "\n".join(parts)
+            elif isinstance(content, list):
+                parts = []
                 for item in content:
-                    if isinstance(item, dict):
-                        if item.get("type") == "tool_use":
-                            text_parts.append(f"[Tool Call {item.get('name')}]: {item.get('input')}")
-                        elif item.get("type") == "tool_result":
-                            text_parts.append(f"[Tool Result]: {item.get('content')}")
-                        else:
-                            text_parts.append(str(item))
+                    if isinstance(item, dict) and item.get("type") == "tool_use":
+                        parts.append(f"[Tool Call {item.get('name')}]: {clip(item.get('input'))}")
+                    elif isinstance(item, dict) and item.get("type") == "tool_result":
+                        parts.append(f"[Tool Result]: {clip(item.get('content'))}")
                     else:
-                        text_parts.append(str(item))
-                content = "\n".join(text_parts)
-            transcript.append(f"{role}: {content}")
+                        parts.append(clip(item))
+                content = "\n".join(parts)
+            else:
+                content = clip(content)
+            transcript.append(f"{m['role']}: {content}")
 
-        full_text = "\n".join(transcript)
-
+        full_text = "\n".join(transcript)[-self.SEGMENT_TOTAL_CHARS:]
+        earlier = f"Summary of even earlier messages:\n{prior_summary}\n\n" if prior_summary else ""
+        prompt = (
+            "Summarize the following conversation segment from a coding session into one "
+            "concise summary, merged with the earlier summary if given. Preserve the user's "
+            "goals, key decisions, files changed, commands run, and unresolved problems.\n\n"
+            f"{earlier}Messages:\n{full_text}"
+        )
         from llm.client import fast_llm
-        prompt = f"Summarize the following conversation segment concisely, preserving key decisions and technical facts:\n\n{full_text}"
         try:
             return fast_llm().chat("You are a memory compression engine. Be concise and factual.", prompt, max_tokens=1024)
         except Exception:
             return None
+
+    def save_segment_summary(self, summary: str):
+        """Archive a mid-session summary in episodic memory for this conversation."""
+        self.episodic.save_summary(self.conversations.conversation_id, summary)
 
     def list_conversations(self, limit: int = 20) -> list[dict]:
         return self.conversations.list_conversations(limit=limit)

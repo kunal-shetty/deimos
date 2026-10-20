@@ -20,6 +20,9 @@ class Context:
             return self._base_system
         return self._base_system + "".join(f"\n\n{block}" for block in self._transient.values())
 
+    def get_transient(self, key: str) -> str | None:
+        return self._transient.get(key)
+
     def set_transient(self, key: str, block: str | None):
         """Set (or clear, with None/empty) a named block on the system prompt."""
         if block:
@@ -95,6 +98,10 @@ class Context:
             # Never leave an orphaned tool result at the head of the history
             while unit_end < len(self._messages) and _count_tool_results(self._messages[unit_end]):
                 unit_end += 1
+
+            # Always keep the latest unit so the model has something to answer
+            if unit_end >= len(self._messages):
+                break
 
             removed.extend(self._messages[:unit_end])
             self._messages = self._messages[unit_end:]

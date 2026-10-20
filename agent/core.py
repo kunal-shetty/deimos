@@ -6,12 +6,19 @@ import time
 import requests
 from config import MAX_ITERATIONS, DASHBOARD_HOST, DASHBOARD_PORT
 from agent.context import Context
+from agent.instructions import load_instructions
 from agent.planner import Planner, StepStatus, AnalysisResult
 from llm.client import LLMClient
 from tools.registry import ToolRegistry
 from tools.run_command import is_dangerous
 from ui.terminal import TerminalUI
 from memory.manager import MemoryManager
+
+SESSION_SUMMARY_KEY = "session_summary"
+SESSION_SUMMARY_HEADER = (
+    "## Earlier in this session\n"
+    "Older messages were trimmed to fit the context window. Summary of them:\n"
+)
 
 
 class Agent:
@@ -49,6 +56,7 @@ class Agent:
             ui.memory_loaded()
 
         self.ctx = Context(enriched_system)
+        self.reload_instructions()
 
         resumed_messages = memory.load_resumed_messages()
         for msg in resumed_messages:
@@ -172,17 +180,8 @@ class Agent:
         # If we have an active plan, inject its current state into the context
         self._inject_workflow_status()
 
-        # --- Context Window Management ---
-        removed_msgs = self.ctx.truncate()
-        if removed_msgs:
-            self.ui.info(f"Context limit reached. Summarizing {len(removed_msgs)} old messages...")
-            summary = self.memory.summarize_segment(removed_msgs)
-            if summary:
-                # Store the summary in episodic memory for long-term retrieval
-                self.memory.episodic.save_summary(summary)
-                self.ui.info("Conversation segment archived to memory.")
-
         for iterations in range(1, MAX_ITERATIONS + 1):
+            self._compact_if_needed()
             self.ui.thinking()
             response = self._stream_or_complete()
 
@@ -293,6 +292,31 @@ class Agent:
 
         self.ui.error(f"Reached max iterations ({MAX_ITERATIONS}). Stopping.")
 
+    def _compact_if_needed(self):
+        """
+        When the history outgrows the context budget, trim the oldest messages
+        and fold them into a rolling session summary on the system prompt, so
+        the agent keeps the gist of what it already did this session.
+        """
+        removed_msgs = self.ctx.truncate()
+        if not removed_msgs:
+            return
+        self.ui.info(f"Context limit reached. Summarizing {len(removed_msgs)} old messages...")
+        prior = self.ctx.get_transient(SESSION_SUMMARY_KEY)
+        summary = self.memory.summarize_segment(
+            removed_msgs, prior_summary=prior[len(SESSION_SUMMARY_HEADER):] if prior else None,
+        )
+        if not summary:
+            self.ui.info("Could not summarize the trimmed messages; continuing without them.")
+            return
+        self.ctx.set_transient(SESSION_SUMMARY_KEY, SESSION_SUMMARY_HEADER + summary)
+        try:
+            # Also archive in episodic memory: end-of-session summaries only see what's left
+            self.memory.save_segment_summary(summary)
+        except Exception:
+            pass
+        self.ui.info("Older messages summarized and archived to memory.")
+
     def _stream_or_complete(self) -> dict:
         self._streamed = False
         stream_started = False
@@ -332,8 +356,15 @@ class Agent:
         self.ui.saving_memory()
         return self.memory.end_session(self.ctx.messages)
 
+    def reload_instructions(self) -> bool:
+        """(Re)load DEIMOS.md files into the system prompt. Returns True if any were found."""
+        block = load_instructions()
+        self.ctx.set_transient("instructions", block)
+        return block is not None
+
     def reset(self):
         self.ctx.reset()
+        self.reload_instructions()
         self._pending_plan = None
         self._pending_task = None
         self.active_plan = None

@@ -16,7 +16,14 @@ Deimos supports several in-session commands to manage your experience:
 - `/help`: Show all available commands.
 - `/reset`: Clear current context (memory is preserved).
 - `/exit`: Save session and quit.
-- `/status`: Show current session info (working dir, model, plan mode).
+- `/status`: Show current session info (working dir, models, decision backend, plan mode).
+
+### Project Instructions
+- `/init [--force]`: Explore the project and write a `DEIMOS.md` with its commands, layout and conventions.
+- `/instructions`: List the `DEIMOS.md` files loaded into this session.
+
+Deimos loads `~/.deimos/DEIMOS.md` plus every `DEIMOS.md` from the filesystem root down to the
+working directory; the closest one takes precedence. Edit them freely — `/reset` reloads them.
 
 ### Memory & Projects
 - `/memory`: Show what Deimos remembers about you globally.
@@ -33,6 +40,13 @@ Deimos supports several in-session commands to manage your experience:
 - `/model <name>`: Switch the LLM model (e.g., `gpt-4o`, `claude-3-5-sonnet`).
 - `/verbose`: Toggle verbose tool outputs.
 - `/clear-screen`: Clear the terminal.
+
+### Long Sessions
+- Tool outputs longer than `tool_output_limit` characters (default 8000, set in
+  `.deimos/settings.json`) are shortened to their start and end; the full text is saved under
+  `.deimos/outputs/` and the agent can page through it with `read_file`.
+- When the conversation outgrows the context window, older messages are folded into a running
+  summary that stays in the prompt, and are archived to episodic memory.
 
 ## 3. Prompting Tips
 

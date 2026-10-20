@@ -51,3 +51,6 @@ Desktop.ini
 # Project specific
 workspace/output.txt
 *.egg-info/
+
+# Deimos per-project state (plans, saved tool outputs, checkpoints)
+.deimos/
