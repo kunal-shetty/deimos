@@ -18,6 +18,13 @@ Deimos supports several in-session commands to manage your experience:
 - `/exit`: Save session and quit.
 - `/status`: Show current session info (working dir, models, decision backend, plan mode).
 
+### Keys
+- `shift+tab`: cycle the permission mode (shown under the input box).
+- `\` then `enter`, or `alt+enter`: start a new line in your message.
+- `tab`: complete a `/command`.
+- `ctrl+c`: interrupt the agent.
+- At an approval panel: `↑`/`↓` or `1`-`3` to choose, `enter` to confirm, `esc` to decline.
+
 ### Permissions and Undo
 - `/mode [ask|auto-edit|auto|read-only]`: Show or switch the permission mode.
   - `ask` (default): show a diff and ask before each file edit; ask before each command.

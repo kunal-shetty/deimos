@@ -9,7 +9,7 @@ from agent.permissions import Permissions
 from llm.decide import DecisionError
 from tools.base import FileChange
 from tools.registry import ToolRegistry
-from ui.terminal import MarkdownStream, _strip_ansi, render_diff, tool_summary
+from ui.terminal import MarkdownStream, _strip_ansi, diff_headline, render_diff, tool_summary
 
 
 # ── #5 checkpoints ───────────────────────────────────────────────────────────
@@ -64,8 +64,9 @@ class FakeUI:
         self.answers = list(answers)
         self.asked = []
 
-    def ask_permission(self, title, detail=None, change=None, danger=False, always_label=None):
-        self.asked.append({"title": title, "danger": danger, "always": always_label, "change": change})
+    def ask_permission(self, title, detail=None, change=None, danger=False, always_label=None, question=None):
+        self.asked.append({"title": title, "danger": danger, "always": always_label, "change": change,
+                           "question": question})
         return self.answers.pop(0)
 
 
@@ -165,6 +166,9 @@ def test_declined_edit_is_not_applied(tmp_path, monkeypatch):
     assert result.startswith("User declined")
     assert (tmp_path / "f.py").read_text(encoding="utf-8") == "x = 1\n"
     assert isinstance(ui.asked[0]["change"], FileChange)
+    assert ui.asked[0]["title"] == "Edit file"
+    assert ui.asked[0]["question"] == "Do you want to make this edit to f.py?"
+    assert ui.asked[0]["always"] == "file edits"
 
 
 def test_auto_edit_applies_shows_diff_and_can_be_undone(tmp_path, monkeypatch):
@@ -219,27 +223,72 @@ def test_markdown_stream_is_independent_of_chunking(size):
 
 
 def test_markdown_stream_renders_structure():
-    text = _render([MARKDOWN])
-    assert text.splitlines()[0] == "Summary"
-    assert "Changed two files in agent/:" in text
-    assert "  • first item" in text and "  1. numbered" in text
-    assert "┃ a quote" in text and "─" * 10 in text
-    assert "╭─ python" in text and "│ x = 1" in text and "╰─" in text
-    assert "2 * 3 = 6 and *not bold*" in text
+    lines = _render([MARKDOWN]).splitlines()
+    assert lines[0] == "Summary"
+    assert "Changed two files in agent/:" in lines
+    assert "• first item" in lines and "1. numbered" in lines
+    assert "┃ a quote" in lines and any(l.startswith("─" * 10) for l in lines)
+    assert "╭─ python" in lines and "│ x = 1" in lines and "╰─" in lines
+    assert lines[-1] == "2 * 3 = 6 and *not bold*"
 
 
-def test_render_diff_counts_and_numbers_lines():
-    lines = [_strip_ansi(l) for l in render_diff(FileChange("f.py", "a\nb\nc\n", "a\nB\nc\nd\n"))]
-    assert lines[0] == "f.py  +2 -1"
-    assert "   2 - b" in lines and "   2 + B" in lines and "   4 + d" in lines
+def test_markdown_stream_indents_lines_after_the_first():
+    out = []
+    stream = MarkdownStream(out.append, indent="  ")
+    stream.feed("first\n- item\nlast")
+    stream.finish()
+    assert _strip_ansi("".join(out)).splitlines() == ["first", "  • item", "  last"]
+
+
+def test_render_diff_numbers_lines_and_pads_bars():
+    change = FileChange("f.py", "a\nb\nc\n", "a\nB\nc\nd\n")
+    assert diff_headline(change) == "Update f.py with 2 additions and 1 removal"
+    lines = [_strip_ansi(l) for l in render_diff(change, width=20)]
+    assert "   2 - b".ljust(20) in lines and "   2 + B".ljust(20) in lines and "   4 + d".ljust(20) in lines
+    assert "   1   a" in lines
 
 
 def test_render_diff_new_file():
-    lines = [_strip_ansi(l) for l in render_diff(FileChange("n.py", None, "one\ntwo"))]
-    assert lines[0] == "n.py  new file, 2 lines" and lines[1] == "   1 + one"
+    change = FileChange("n.py", None, "one\ntwo")
+    assert diff_headline(change) == "Create n.py (2 lines)"
+    assert [_strip_ansi(l) for l in render_diff(change)] == ["   1 + one", "   2 + two"]
+
+
+def test_fit_truncates_by_visible_width_and_keeps_colour_codes():
+    from ui.terminal import GREEN, RESET, _fit
+    s = f"{GREEN}hello world{RESET}"
+    assert _strip_ansi(_fit(s, 8)) == "hello w…"
+    assert _strip_ansi(_fit("hi", 5)) == "hi   "
+    assert _fit(s, 50, pad=False) == s
+
+
+def test_result_summaries():
+    from ui.terminal import result_lines
+    assert result_lines("read_file", "[lines 3-4 of 10]\n3\n4\n")[0] == "Read lines 3-4 of 10"
+    assert result_lines("read_file", "a\nb\nc")[0] == "Read 3 lines"
+    head, detail, hidden = result_lines("run_command", "[exit 1]\n" + "\n".join(f"l{i}" for i in range(10)))
+    assert head == "[exit 1]" and detail == ["l7", "l8", "l9"] and hidden == 7
+    head, detail, hidden = result_lines("run_command", "one\ntwo")
+    assert head == "one" and detail == ["two"] and hidden == 0
+
+
+def test_permission_panel_typed_fallback(monkeypatch, capsys):
+    from ui.terminal import TerminalUI
+    monkeypatch.setattr("ui.terminal._interactive", lambda: False)
+    ui = TerminalUI()
+    monkeypatch.setattr("builtins.input", lambda prompt="": "use ruff instead")
+    answer = ui.ask_permission("Run command", ["$ flake8"], always_label="`flake8` commands",
+                               question="Do you want to run this command?")
+    out = _strip_ansi(capsys.readouterr().out)
+    assert answer == ("n", "use ruff instead")
+    assert "Run command" in out and "Do you want to run this command?" in out
+    assert "2. Yes, and don't ask again for `flake8` commands this session" in out
+
+    monkeypatch.setattr("builtins.input", lambda prompt="": "2")
+    assert ui.ask_permission("Run command", always_label="`flake8` commands") == ("a", None)
 
 
 def test_tool_summaries():
-    assert tool_summary("run_command", {"command": "pytest -q"}) == "$ pytest -q"
-    assert tool_summary("read_file", {"path": "a.py", "offset": 10, "limit": 5}) == "a.py  lines 10-14"
-    assert tool_summary("write_file", {"path": "a.py", "content": "1\n2"}) == "a.py  (2 lines)"
+    assert tool_summary("run_command", {"command": "pytest -q"}) == "pytest -q"
+    assert tool_summary("read_file", {"path": "a.py", "offset": 10, "limit": 5}) == "a.py, lines 10-14"
+    assert tool_summary("write_file", {"path": "a.py", "content": "1\n2"}) == "a.py, 2 lines"

@@ -101,20 +101,15 @@ def build_agent(ui, llm, tools, system_prompt, plan_mode, user_id, permissions, 
                  plan_mode=plan_mode, permissions=permissions)
 
 
-def status_items(state):
-    """Status bar under the prompt: mode, model, context use, session tokens."""
+def status_items(state) -> dict:
+    """Footer under the input box: permission mode, model, context use, pending plan."""
     agent = state.agent
-    mode = agent.permissions.mode
-    used = agent.ctx.estimated_tokens / CONTEXT_SAFE_LIMIT
-    items = [
-        ("mode", mode, {"auto": "danger", "auto-edit": "warn"}.get(mode, "")),
-        ("model", state.llm.model, ""),
-        ("context", f"{used:.0%}", "danger" if used > 0.9 else ("warn" if used > 0.7 else "")),
-        ("tokens", f"{state.llm.total_input_tokens / 1000:.1f}k in / {state.llm.total_output_tokens / 1000:.1f}k out", ""),
-    ]
-    if agent._pending_plan is not None:
-        items.append(("plan", "awaiting confirmation", "warn"))
-    return items
+    return {
+        "mode": agent.permissions.mode,
+        "model": state.llm.model,
+        "context": agent.ctx.estimated_tokens / CONTEXT_SAFE_LIMIT,
+        "plan_pending": agent._pending_plan is not None,
+    }
 
 
 def main():
@@ -172,6 +167,7 @@ def main():
     # Enable slash-command completion and the status bar before the first prompt
     ui.setup_input(registry.names_with_descriptions())
     ui.set_status_provider(lambda: status_items(state))
+    ui.set_mode_cycler(lambda: state.agent.permissions.cycle_mode())
 
     try:
         while state.running:

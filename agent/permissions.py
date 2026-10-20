@@ -61,6 +61,11 @@ class Permissions:
         self._grants: set[str] = set()
         self._danger_cache: dict[str, tuple[bool, str | None]] = {}
 
+    def cycle_mode(self) -> str:
+        """Advance to the next mode (Shift+Tab)."""
+        self.mode = MODES[(MODES.index(self.mode) + 1) % len(MODES)]
+        return self.mode
+
     def set_mode(self, mode: str):
         if mode not in MODES:
             raise ValueError(f"Unknown mode {mode!r}; choose one of: {', '.join(MODES)}")
@@ -89,7 +94,7 @@ class Permissions:
         if tool.kind == "edit":
             if self.mode in ("auto-edit", "auto") or "edit" in self._grants:
                 return Verdict(True)
-            return self._ask(tool, inputs, change, grant=("edit", "always allow file edits"))
+            return self._ask(tool, inputs, change, grant=("edit", "file edits"))
 
         grant = self._exec_grant(tool, inputs)
         if self.mode == "auto" and not tool.outward:
@@ -118,28 +123,39 @@ class Permissions:
     # ── Internals ────────────────────────────────────────────────────────────
 
     def _exec_grant(self, tool, inputs: dict) -> tuple[str, str] | None:
+        """(grant key, what "don't ask again" covers), or None when it can't be granted."""
         if tool.name != "run_command":
-            return (f"tool:{tool.name}", f"always allow {tool.name}")
+            return (f"tool:{tool.name}", tool.name)
         command = inputs.get("command", "").strip()
         if not command or _COMPOUND_RE.search(command):
             return None
         program = command.split()[0]
-        return (f"cmd:{program}", f"always allow `{program}` commands")
+        return (f"cmd:{program}", f"`{program}` commands")
 
     def _ask(self, tool, inputs, change, grant, danger: bool = False, reason: str | None = None) -> Verdict:
-        from ui.terminal import tool_label, tool_summary, WHITE, GREY, RESET
+        from ui.terminal import tool_summary, WHITE, YELLOW, RED, RESET
 
         detail = []
         if change is None or tool.kind != "edit":
-            detail.append(f"{WHITE}{tool_summary(tool.name, inputs)}{RESET}")
+            prompt = "$ " if tool.name == "run_command" else ""
+            detail.append(f"{WHITE}{prompt}{tool_summary(tool.name, inputs)}{RESET}")
         if reason:
-            detail.append(f"{GREY}Flagged: {reason}{RESET}")
-        title = (f"Allow this potentially destructive {tool_label(tool.name).lower()}?" if danger
-                 else f"Allow {tool_label(tool.name).lower()}?")
+            detail.append(f"{RED if danger else YELLOW}Flagged: {reason}{RESET}")
+
+        if tool.kind == "edit":
+            target = (tool.target_paths(**inputs) or ["this file"])[0]
+            title = "Create file" if change is not None and change.old is None else "Edit file"
+            question = f"Do you want to make this edit to {target}?"
+        elif tool.name == "run_command":
+            title = "Potentially destructive command" if danger else "Run command"
+            question = "Do you want to run this command?"
+        else:
+            title = tool.name.replace("_", " ").capitalize()
+            question = "Do you want to proceed?"
 
         answer, feedback = self.ui.ask_permission(
             title, detail, change=change if tool.kind == "edit" else None,
-            danger=danger, always_label=grant[1] if grant else None,
+            danger=danger, always_label=grant[1] if grant else None, question=question,
         )
         if answer == "a" and grant:
             self._grants.add(grant[0])
