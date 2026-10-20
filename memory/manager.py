@@ -175,12 +175,12 @@ class MemoryManager:
 
         full_text = "\n".join(transcript)
 
-        from llm.client import LLMClient
-        client = LLMClient()
+        from llm.client import fast_llm
         prompt = f"Summarize the following conversation segment concisely, preserving key decisions and technical facts:\n\n{full_text}"
-
-        res = client.complete(system="You are a memory compression engine. Be concise and factual.", messages=[{"role": "user", "content": prompt}], tools=[])
-        return res.get("text")
+        try:
+            return fast_llm().chat("You are a memory compression engine. Be concise and factual.", prompt, max_tokens=1024)
+        except Exception:
+            return None
 
     def list_conversations(self, limit: int = 20) -> list[dict]:
         return self.conversations.list_conversations(limit=limit)

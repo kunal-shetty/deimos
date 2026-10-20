@@ -6,11 +6,9 @@ At the end of each conversation, facts are extracted and merged into
 semantic_memories with confidence/frequency tracking.
 """
 
-import json
-import requests
-from config import LLM_API_KEY, LLM_MODEL
+from llm.client import fast_llm, parse_json_text
 from memory.supabase_client import get_client
-from memory.episodic import _messages_to_transcript, GROQ_API_URL
+from memory.episodic import _messages_to_transcript
 
 FACT_EXTRACTION_PROMPT = (
     "You are a fact extractor for an AI coding agent's memory system. "
@@ -70,44 +68,17 @@ class SemanticMemory:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _extract_facts(self, transcript: str) -> list[dict]:
-        payload = {
-            "model": LLM_MODEL,
-            "max_tokens": 1024,
-            "temperature": 0.2,
-            "messages": [
-                {"role": "system", "content": FACT_EXTRACTION_PROMPT},
-                {"role": "user", "content": transcript},
-            ],
-        }
-
+        raw = fast_llm().chat(FACT_EXTRACTION_PROMPT, transcript, max_tokens=1024, temperature=0.2)
         try:
-            response = requests.post(
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=60,
-            )
-            response.raise_for_status()
-            raw = response.json()["choices"][0]["message"]["content"].strip()
-
-            # Strip accidental markdown fences
-            if raw.startswith("```"):
-                raw = raw.strip("`")
-                if raw.startswith("json"):
-                    raw = raw[4:]
-
-            facts = json.loads(raw)
-            if not isinstance(facts, list):
-                return []
-            return [
-                f for f in facts
-                if isinstance(f, dict) and "key" in f and "value" in f
-            ]
-        except Exception:
+            facts = parse_json_text(raw)
+        except (ValueError, TypeError):
             return []
+        if not isinstance(facts, list):
+            return []
+        return [
+            f for f in facts
+            if isinstance(f, dict) and "key" in f and "value" in f
+        ]
 
     def _merge_fact(self, key: str, value: str, confidence: float):
         """

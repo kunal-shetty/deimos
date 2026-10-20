@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
-from config import LLM_MODEL
+from llm.decide import DecisionError, Pick, get_decider
 
 PLAN_DIR_NAME = ".deimos/plans"
 
@@ -44,22 +44,26 @@ class PlanAnalysis:
     plan: Optional[Plan] = None
     questions: Optional[list[str]] = None
 
+TRIAGE_QUESTION = Pick(
+    instructions="How should an autonomous coding agent handle this user request?",
+    options={
+        "execute": (
+            "Can be handled directly: small talk or thanks, the user telling the agent about "
+            "themselves, their project or preferences (no task requested), a question, "
+            "a single file read or edit, a one-line answer."
+        ),
+        "plan": "An explicit task request that is multi-step: needs several coordinated changes or actions.",
+        "clarify": (
+            "A task request that is ambiguous, too broad, or missing critical context "
+            "(e.g. 'fix the bug' without saying which bug)."
+        ),
+    },
+)
+
 PLANNING_PROMPT = (
     "You are a planning assistant for an autonomous coding agent called Deimos. "
-    "Given a user's task request, you must first determine if the request is clear "
-    "enough to proceed. "
-    "\n\n"
-    "1. CLARIFY: If the request is ambiguous, lacks critical context, or is too broad "
-    "(e.g., 'fix the bug' without specifying which bug), respond with: "
-    "{\"decision\": \"clarify\", \"questions\": [\"<question 1>\", \"<question 2>\"]}. "
-    "Ask targeted questions to narrow down the scope. "
-    "\n\n"
-    "2. EXECUTE: If the task is simple and unambiguous (a single file read, a "
-    "one-line answer, a quick question), respond with: "
-    "{\"decision\": \"execute\"}. "
-    "\n\n"
-    "3. PLAN: If the task is clear but multi-step, respond with a structured workflow: "
-    "{\"decision\": \"plan\", \"title\": \"<short title>\", "
+    "Break the user's task into a structured workflow: "
+    "{\"title\": \"<short title>\", "
     "\"steps\": [ "
     "{\"id\": \"s1\", \"description\": \"...\", \"dependencies\": []}, "
     "{\"id\": \"s2\", \"description\": \"...\", \"dependencies\": [\"s1\"]}, "
@@ -68,6 +72,13 @@ PLANNING_PROMPT = (
     "Ensure the graph is a Directed Acyclic Graph (DAG). "
     "Aim for 3-8 steps. "
     "\n\nRespond with ONLY the JSON object, no markdown fences, no extra text."
+)
+
+CLARIFY_PROMPT = (
+    "The user's request to an autonomous coding agent is ambiguous or missing "
+    "critical context. Ask 1-3 short, targeted questions that would narrow it "
+    "down enough to start. Respond with ONLY a JSON object: "
+    "{\"questions\": [\"<question 1>\", ...]}."
 )
 
 
@@ -112,17 +123,40 @@ class Plan:
 class Planner:
     """Generates plans via a quick LLM call and persists them to disk."""
 
-    def __init__(self, llm_client=None):
+    def __init__(self, llm_client=None, decider=None):
         self.llm = llm_client
+        self._decider = decider
 
+    @property
+    def decider(self):
+        return self._decider or get_decider()
 
     def maybe_plan(self, task: str) -> PlanAnalysis:
         """
         Analyze the task and decide whether to plan, execute immediately, or clarify.
+        The decision itself is a cheap structured call; plans and questions are
+        only generated when that decision calls for them.
         """
         if not self.llm:
             return PlanAnalysis(decision=AnalysisResult.EXECUTE)
 
+        try:
+            decision = AnalysisResult(self.decider.decide(task, {"route": TRIAGE_QUESTION})["route"].value)
+        except (DecisionError, ValueError):
+            # Fallback: assume immediate execution if analysis fails
+            return PlanAnalysis(decision=AnalysisResult.EXECUTE)
+
+        if decision == AnalysisResult.CLARIFY:
+            return PlanAnalysis(decision=AnalysisResult.CLARIFY, questions=self._clarifying_questions(task))
+
+        if decision == AnalysisResult.PLAN:
+            plan = self._generate_plan(task)
+            if plan:
+                return PlanAnalysis(decision=AnalysisResult.PLAN, plan=plan)
+
+        return PlanAnalysis(decision=AnalysisResult.EXECUTE)
+
+    def _generate_plan(self, task: str) -> Optional[Plan]:
         try:
             data = self.llm.complete_json(
                 system=PLANNING_PROMPT,
@@ -130,33 +164,37 @@ class Planner:
                 max_tokens=600,
                 temperature=0.2,
             )
-            if "error" in data:
-                raise ValueError(data["error"])
         except Exception:
-            # Fallback: assume immediate execution if analysis fails
-            return PlanAnalysis(decision=AnalysisResult.EXECUTE)
+            return None
+        steps_data = data.get("steps") if isinstance(data, dict) else None
+        if not steps_data or not isinstance(steps_data, list):
+            return None
+        steps = [
+            Step(
+                id=str(s.get("id", f"s{i + 1}")),
+                description=s.get("description", "No description"),
+                dependencies=[str(d) for d in s.get("dependencies", [])],
+            )
+            for i, s in enumerate(steps_data) if isinstance(s, dict)
+        ]
+        if not steps:
+            return None
+        return Plan(title=data.get("title", "Untitled plan"), steps=steps, task=task)
 
-        decision_str = data.get("decision", "execute").lower()
-        decision = AnalysisResult(decision_str) if decision_str in [r.value for r in AnalysisResult] else AnalysisResult.EXECUTE
-
-        if decision == AnalysisResult.CLARIFY:
-            return PlanAnalysis(decision=AnalysisResult.CLARIFY, questions=data.get("questions", []))
-
-        if decision == AnalysisResult.PLAN:
-            title = data.get("title", "Untitled plan")
-            steps_data = data.get("steps", [])
-            if steps_data:
-                steps = []
-                for s in steps_data:
-                    steps.append(Step(
-                        id=s.get("id", "unknown"),
-                        description=s.get("description", "No description"),
-                        dependencies=s.get("dependencies", [])
-                    ))
-                return PlanAnalysis(decision=AnalysisResult.PLAN, plan=Plan(title=title, steps=steps, task=task))
-            return PlanAnalysis(decision=AnalysisResult.EXECUTE)
-
-        return PlanAnalysis(decision=AnalysisResult.EXECUTE)
+    def _clarifying_questions(self, task: str) -> list[str]:
+        from llm.client import fast_llm
+        try:
+            data = fast_llm().complete_json(
+                system=CLARIFY_PROMPT,
+                messages=[{"role": "user", "content": task}],
+                max_tokens=300,
+            )
+        except Exception:
+            return []
+        questions = data.get("questions") if isinstance(data, dict) else None
+        if not isinstance(questions, list):
+            return []
+        return [str(q) for q in questions if str(q).strip()][:3]
 
     # ── Persistence ──────────────────────────────────────────────────────────
 

@@ -18,11 +18,12 @@ dependencies = [
     "uvicorn>=0.29.0",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.20.0",
+    "typesafe-sdk>=0.7.5,<0.8",
 ]
 
 [project.scripts]
 deimos = "main:main"
 
 [tool.setuptools]
-py-modules = ["main", "config"]
+py-modules = ["main", "config", "settings"]
 packages = ["agent", "tools", "llm", "ui", "memory", "commands", "web", "auth"]

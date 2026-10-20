@@ -12,6 +12,13 @@ PROMPTS_DIR = ROOT_DIR / "prompts"
 LLM_API_KEY = os.getenv("GROQ_API_KEY")
 LLM_PROVIDER = "groq"
 LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
+# Smaller, cheaper model for side jobs: plan steps aside, titles, summaries,
+# fact extraction and the Groq fallback for structured decisions
+LLM_MODEL_FAST = os.getenv("LLM_MODEL_FAST", "openai/gpt-oss-20b")
+
+# Structured decisions (TypeSafe Jev). Unset key -> Groq fallback only.
+TYPESAFE_API_KEY = os.getenv("TYPESAFE_API_KEY")
+JEV_MODEL = os.getenv("JEV_MODEL", "jev-latest")
 
 # Web Search
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")

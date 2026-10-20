@@ -40,6 +40,7 @@ class Agent:
         self.active_plan = None    # Currently executing workflow
         self.waiting_for_clarification = False
         self._clarification_questions = []
+        self._clarification_task = None
 
         memory_block = memory.build_memory_context()
         enriched_system = system_prompt
@@ -66,9 +67,17 @@ class Agent:
         plan confirmation, and normal execution.
         """
         if self.waiting_for_clarification:
-            # User is answering a clarification question
+            # User is answering a clarification question: combine it with the
+            # original request so neither the planner nor the agent loses it.
+            questions = "\n".join(f"- {q}" for q in self._clarification_questions)
+            user_input = (
+                f"{self._clarification_task}\n\n"
+                f"Clarifying questions asked:\n{questions}\n\n"
+                f"User's answer: {user_input}"
+            )
             self.waiting_for_clarification = False
             self._clarification_questions = []
+            self._clarification_task = None
             # Fall through to the planner to see if we can now proceed
 
         if self._pending_plan is not None:
@@ -81,6 +90,7 @@ class Agent:
 
             if analysis.decision == AnalysisResult.CLARIFY:
                 self.waiting_for_clarification = True
+                self._clarification_task = user_input
                 self._clarification_questions = analysis.questions or ["Could you provide more details?"]
                 self.ui.agent_response(
                     "I need a bit more information before I can plan this effectively:\n\n" +
@@ -327,3 +337,6 @@ class Agent:
         self._pending_plan = None
         self._pending_task = None
         self.active_plan = None
+        self.waiting_for_clarification = False
+        self._clarification_questions = []
+        self._clarification_task = None

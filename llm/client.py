@@ -1,7 +1,9 @@
 import json
+import re
+import threading
 import time
 import requests
-from config import LLM_API_KEY, LLM_MODEL
+from config import LLM_API_KEY, LLM_MODEL, LLM_MODEL_FAST
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 RETRY_ATTEMPTS = 5
@@ -12,14 +14,14 @@ REQUEST_TIMEOUT = 180  # (connect, read) seconds — never hang forever on a stu
 class LLMClient:
     """Groq API client using raw HTTP requests (OpenAI-compatible endpoint)."""
 
-    def __init__(self):
+    def __init__(self, model: str | None = None):
         if not LLM_API_KEY:
             raise ValueError("GROQ_API_KEY is not set. Add it to your .env file.")
         self._headers = {
             "Authorization": f"Bearer {LLM_API_KEY}",
             "Content-Type": "application/json",
         }
-        self.model = LLM_MODEL
+        self.model = model or LLM_MODEL
         # Cumulative token usage for the session (updated on every call)
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -57,9 +59,10 @@ class LLMClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": oai_messages,
-            "tools": oai_tools,
-            "tool_choice": "auto",
         }
+        if oai_tools:
+            payload["tools"] = oai_tools
+            payload["tool_choice"] = "auto"
 
         response = self._post_with_retry(payload)
         data = response.json()
@@ -111,10 +114,11 @@ class LLMClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": oai_messages,
-            "tools": oai_tools,
-            "tool_choice": "auto",
             "stream": True,
         }
+        if oai_tools:
+            payload["tools"] = oai_tools
+            payload["tool_choice"] = "auto"
 
         response = self._post_with_retry(payload, stream=True)
 
@@ -237,6 +241,18 @@ class LLMClient:
         except json.JSONDecodeError:
             return {"error": "Failed to parse LLM response as JSON", "raw": content}
 
+    def chat(self, system: str, user: str, max_tokens: int = 512, temperature: float = 0.3) -> str | None:
+        """Plain one-shot text completion (no tools). Returns None on any failure."""
+        if not user.strip():
+            return None
+        try:
+            res = self.complete(system=system, messages=[{"role": "user", "content": user}],
+                                tools=[], max_tokens=max_tokens, temperature=temperature)
+        except Exception:
+            return None
+        text = (res.get("text") or "").strip()
+        return text or None
+
     def _post_with_retry(self, payload: dict, stream: bool = False) -> requests.Response:
         """POST with exponential backoff on 429 rate limit responses."""
         delay = RETRY_BASE_DELAY
@@ -262,6 +278,29 @@ class LLMClient:
             return response
 
         response.raise_for_status()  # final raise if somehow exhausted
+
+
+_fast_client: LLMClient | None = None
+_fast_lock = threading.Lock()
+
+
+def fast_llm() -> LLMClient:
+    """Shared client on the fast model, for side jobs that don't need the main model."""
+    global _fast_client
+    with _fast_lock:
+        if _fast_client is None:
+            from settings import load_settings
+            _fast_client = LLMClient(model=load_settings()["models"].get("fast") or LLM_MODEL_FAST)
+        return _fast_client
+
+
+def parse_json_text(raw: str):
+    """Parse a JSON reply, tolerating markdown fences. Raises ValueError on bad JSON."""
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

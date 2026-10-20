@@ -155,10 +155,30 @@ class StatusCommand(Command):
             "Active project": agent.memory._active_project or "—",
             "Messages in context": len(agent.ctx.messages),
             "Model": state.llm.model,
+            "Fast model": _fast_model_name(),
+            "Decisions": _decider_status(),
             "Session tokens": f"↑{state.llm.total_input_tokens} ↓{state.llm.total_output_tokens}",
             "Plan mode": "on" if agent.plan_mode else "off",
             "Verbose": "on" if state.ui.verbose else "off",
         })
+
+
+def _fast_model_name() -> str:
+    try:
+        from llm.client import fast_llm
+        return fast_llm().model
+    except Exception as e:
+        return f"unavailable ({e})"
+
+
+def _decider_status() -> str:
+    from llm.decide import get_decider
+    decider = get_decider()
+    status = decider.name
+    failures = getattr(decider, "primary_failures", 0)
+    if failures:
+        status += f" ({failures} Jev failures; last: {decider.last_error[:80]})"
+    return status
 
 
 class ModelCommand(Command):

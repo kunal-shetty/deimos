@@ -10,11 +10,10 @@ At session end, facts are extracted and tagged with a project_name (or
 left global if no specific project applies).
 """
 
-import json
-import requests
-from config import LLM_API_KEY, LLM_MODEL
+from llm.client import fast_llm, parse_json_text
+from llm.decide import DecisionError, get_decider
 from memory.supabase_client import get_client
-from memory.episodic import _messages_to_transcript, GROQ_API_URL
+from memory.episodic import _messages_to_transcript
 
 PROJECT_FACT_EXTRACTION_PROMPT = (
     "You are a fact extractor for an AI coding agent's memory system. "
@@ -31,16 +30,9 @@ PROJECT_FACT_EXTRACTION_PROMPT = (
     "Do not include markdown formatting, backticks, or any text outside the JSON array."
 )
 
-PROJECT_DETECTION_PROMPT = (
-    "You are a project classifier for an AI coding agent's memory system. "
-    "Given a list of known project names and a user's message, decide which "
-    "(if any) of the known projects this message is about. "
-    "\n\n"
-    "Respond ONLY with a JSON object: {\"project_name\": \"<name>\" or null}. "
-    "Use null if the message doesn't clearly relate to any known project, or "
-    "if it's a generic/small-talk message. "
-    "Do not include markdown formatting, backticks, or any text outside the JSON object."
-)
+PROJECT_DETECTION_INSTRUCTIONS = "Which of the user's known projects is this message about?"
+NO_PROJECT = "__none__"
+MIN_DETECTION_CONFIDENCE = 0.5
 
 
 class ProjectMemory:
@@ -92,44 +84,15 @@ class ProjectMemory:
         if not known:
             return None
 
-        payload = {
-            "model": LLM_MODEL,
-            "max_tokens": 60,
-            "temperature": 0.0,
-            "messages": [
-                {"role": "system", "content": PROJECT_DETECTION_PROMPT},
-                {
-                    "role": "user",
-                    "content": f"Known projects: {json.dumps(known)}\n\nUser message: {user_message[:500]}",
-                },
-            ],
-        }
-
+        options = {name: None for name in known}
+        options[NO_PROJECT] = "Generic, small talk, or not clearly about any of these projects."
         try:
-            response = requests.post(
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=15,
-            )
-            response.raise_for_status()
-            raw = response.json()["choices"][0]["message"]["content"].strip()
-
-            if raw.startswith("```"):
-                raw = raw.strip("`")
-                if raw.startswith("json"):
-                    raw = raw[4:]
-
-            data = json.loads(raw)
-            project_name = data.get("project_name")
-            if project_name and project_name in known:
-                return project_name
+            answer = get_decider().pick(user_message[:500], PROJECT_DETECTION_INSTRUCTIONS, options)
+        except DecisionError:
             return None
-        except Exception:
+        if answer.confidence is not None and answer.confidence < MIN_DETECTION_CONFIDENCE:
             return None
+        return answer.value if answer.value in known else None
 
     def extract_and_store(self, messages: list[dict]):
         """Extract project-scoped facts from a conversation and merge them in."""
@@ -147,43 +110,17 @@ class ProjectMemory:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _extract_facts(self, transcript: str) -> list[dict]:
-        payload = {
-            "model": LLM_MODEL,
-            "max_tokens": 1024,
-            "temperature": 0.2,
-            "messages": [
-                {"role": "system", "content": PROJECT_FACT_EXTRACTION_PROMPT},
-                {"role": "user", "content": transcript},
-            ],
-        }
-
+        raw = fast_llm().chat(PROJECT_FACT_EXTRACTION_PROMPT, transcript, max_tokens=1024, temperature=0.2)
         try:
-            response = requests.post(
-                GROQ_API_URL,
-                headers={
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=60,
-            )
-            response.raise_for_status()
-            raw = response.json()["choices"][0]["message"]["content"].strip()
-
-            if raw.startswith("```"):
-                raw = raw.strip("`")
-                if raw.startswith("json"):
-                    raw = raw[4:]
-
-            facts = json.loads(raw)
-            if not isinstance(facts, list):
-                return []
-            return [
-                f for f in facts
-                if isinstance(f, dict) and "project_name" in f and "key" in f and "value" in f
-            ]
-        except Exception:
+            facts = parse_json_text(raw)
+        except (ValueError, TypeError):
             return []
+        if not isinstance(facts, list):
+            return []
+        return [
+            f for f in facts
+            if isinstance(f, dict) and "project_name" in f and "key" in f and "value" in f
+        ]
 
     def _merge_fact(self, project_name: str, key: str, value: str, confidence: float):
         existing = (

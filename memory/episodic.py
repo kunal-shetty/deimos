@@ -1,9 +1,5 @@
-import json
-import requests
-from config import LLM_API_KEY, LLM_MODEL
+from llm.client import fast_llm
 from memory.supabase_client import get_client
-
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 ARCHIVE_BATCH_SIZE = 3    # compress into level-1 after 3 episodic summaries
 ARCHIVE_L2_BATCH_SIZE = 3  # compress into level-2 after 3 level-1 archives
 
@@ -135,19 +131,7 @@ def _messages_to_transcript(messages: list[dict]) -> str:
 
 
 def _call_llm(system_prompt: str, user_content: str, max_tokens: int = 512) -> str | None:
-    if not user_content.strip():
-        return None
-    payload = {
-        "model": LLM_MODEL, "max_tokens": max_tokens, "temperature": 0.3,
-        "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}],
-    }
     try:
-        response = requests.post(
-            GROQ_API_URL,
-            headers={"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"},
-            json=payload, timeout=60,
-        )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"].strip()
+        return fast_llm().chat(system_prompt, user_content, max_tokens=max_tokens, temperature=0.3)
     except Exception:
         return None
