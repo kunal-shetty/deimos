@@ -8,6 +8,9 @@ from memory.episodic import EpisodicMemory
 from memory.semantic import SemanticMemory
 from memory.project import ProjectMemory
 from memory.active import score_message_async
+from memory.recall import MemoryRecall, format_recall
+
+CORE_FACTS = 8  # facts always in the prompt when per-message recall is available
 
 class MemoryManager:
     """Top-level memory coordinator for a single user session."""
@@ -32,6 +35,8 @@ class MemoryManager:
         self.episodic = EpisodicMemory(user_id)
         self.semantic = SemanticMemory(user_id)
         self.project = ProjectMemory(user_id)
+        self.recall_store = MemoryRecall(self.client, user_id)
+        self._core_fact_lines: set[str] = set()
 
         self.resumed = False
         if resume_id:
@@ -45,9 +50,15 @@ class MemoryManager:
     def build_memory_context(self) -> str | None:
         sections = []
 
-        facts_block = self.semantic.as_prompt_block()
-        if facts_block:
-            sections.append(f"### What you know about the user\n{facts_block}")
+        # With search available, only the most confident facts load up front;
+        # the rest are recalled per message when they're relevant.
+        facts = self.semantic.get_all_facts()
+        if self.search_available:
+            facts = facts[:CORE_FACTS]
+        if facts:
+            self._core_fact_lines = {f"{f['key']}: {f['value']}" for f in facts}
+            lines = "\n".join(f"- {f['key']}: {f['value']}" for f in facts)
+            sections.append(f"### What you know about the user\n{lines}")
 
         known_projects = self.project.get_known_projects()
         if known_projects:
@@ -102,6 +113,15 @@ class MemoryManager:
                     "I'll take it into account as we work."
                 )
 
+    @property
+    def search_available(self) -> bool:
+        return self.recall_store.available
+
+    def recall(self, user_input: str) -> str | None:
+        """Memories relevant to this message, as a system-prompt block (or None)."""
+        rows = self.recall_store.search(user_input, exclude_conversation=self.conversations.conversation_id)
+        return format_recall(rows, skip_bodies=self._core_fact_lines)
+
     def load_resumed_messages(self) -> list[dict]:
         if not self.resumed:
             return []
@@ -132,14 +152,12 @@ class MemoryManager:
         Persist a message turn. User messages are scored for importance on a
         background thread (non-blocking); the row is patched when scoring lands.
         """
-        self.conversations.save_message(role, content, importance=0, summary=None)
+        message_id = self.conversations.save_message(role, content, importance=0, summary=None)
 
-        if role == "user" and isinstance(content, str) and content.strip():
-            def _apply(importance: int, summary: str):
+        if role == "user" and message_id and isinstance(content, str) and content.strip():
+            def _apply(importance: int, summary: str | None):
                 try:
-                    self.conversations.update_message_importance(
-                        content[:500], importance, summary
-                    )
+                    self.conversations.update_message_importance(message_id, importance, summary)
                 except Exception:
                     pass
 

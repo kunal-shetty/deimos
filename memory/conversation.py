@@ -54,9 +54,9 @@ class ConversationStore:
 
     # ── Messages ─────────────────────────────────────────────────────────────
 
-    def save_message(self, role: str, content, importance: int = 0, summary: str | None = None):
+    def save_message(self, role: str, content, importance: int = 0, summary: str | None = None) -> str | None:
         """
-        Save a single message turn.
+        Save a single message turn and return its id.
         `content` can be a string, dict, or list — stored as jsonb.
         """
         if not self.conversation_id:
@@ -65,29 +65,24 @@ class ConversationStore:
         if not isinstance(content, (str, int, float, bool, type(None))):
             content = _to_jsonable(content)
 
-        self.client.table("messages").insert({
+        result = self.client.table("messages").insert({
             "conversation_id": self.conversation_id,
             "role": role,
             "content": content,
             "importance": importance,
             "summary": summary,
         }).execute()
+        return result.data[0]["id"] if result.data else None
 
-    def update_message_importance(self, content_prefix: str, importance: int, summary: str):
+    def update_message_importance(self, message_id: str, importance: int, summary: str | None):
         """
-        Patch the importance/summary of a recently-saved user message.
-        Matches on the first 500 chars of content — used by the async
-        importance scorer, which runs after the row is already inserted.
+        Patch the importance/summary of a saved message — used by the async
+        importance scorer, which finishes after the row is inserted.
         """
-        if not self.conversation_id:
-            return
         result = (
             self.client.table("messages")
             .update({"importance": importance, "summary": summary})
-            .eq("conversation_id", self.conversation_id)
-            .like("content", f"%{content_prefix[:80].replace('%', '')}%")
-            .order("created_at", desc=True)
-            .limit(1)
+            .eq("id", message_id)
             .execute()
         )
         return result.data

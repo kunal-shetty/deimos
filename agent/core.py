@@ -159,6 +159,14 @@ class Agent:
         except Exception:
             self.ctx.set_transient("git", None)  # Not a git repo or git not installed
 
+    def _recall(self, user_input: str):
+        """Swap in the memories relevant to this message (replaced every turn)."""
+        try:
+            block = self.memory.recall(user_input)
+        except Exception:
+            block = None
+        self.ctx.set_transient("recall", block)
+
     def _inject_workflow_status(self):
         """Expose the active plan (and how to report progress) as a transient system block."""
         if not self.active_plan:
@@ -178,6 +186,7 @@ class Agent:
 
         self.checkpoints.begin(user_input)
         self.memory.detect_and_inject_project(user_input, self.ctx)
+        self._recall(user_input)
         self._inject_git_context()
 
         self.ctx.add_user(user_input)

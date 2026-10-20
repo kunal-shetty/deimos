@@ -22,7 +22,12 @@ class NullMemory:
         self.resumed = False
         self._active_project = None
 
+    search_available = False
+
     def build_memory_context(self) -> None:
+        return None
+
+    def recall(self, user_input: str) -> None:
         return None
 
     def detect_and_inject_project(self, user_input: str, ctx):

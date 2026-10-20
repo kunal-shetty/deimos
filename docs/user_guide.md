@@ -54,6 +54,9 @@ working directory; the closest one takes precedence. Edit them freely — `/rese
 - `/projects`: List all projects Deimos knows about.
 - `/project <name>`: Show specific memory for a project.
 - `/title <text>`: Rename the current conversation.
+- `/recall <text>`: Show which memories Deimos would recall for that text. With memory search set
+  up (see the [Installation Guide](installation.md#memory-search)), each message you send recalls
+  the most relevant facts, project facts, past sessions and earlier messages automatically.
 
 ### Planning
 - `/plan [on|off]`: Toggle the planning phase.

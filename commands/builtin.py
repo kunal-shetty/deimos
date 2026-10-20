@@ -263,6 +263,29 @@ class PlanRejectCommand(Command):
         state.agent._resolve_pending_plan("/plan-reject")
 
 
+class RecallCommand(Command):
+    name = "recall"
+    description = "Show the memories Deimos would recall for some text"
+    usage = "/recall <text>"
+    def run(self, args, state):
+        memory = state.agent.memory
+        if not args.strip():
+            state.ui.error("Usage: /recall <text>")
+            return
+        if not memory.enabled:
+            state.ui.info("Long-term memory is off.")
+            return
+        if not memory.search_available:
+            state.ui.info("Memory search isn't set up yet: run memory/migrations/001_search.sql in Supabase.")
+            return
+        block = memory.recall(args)
+        if not block:
+            state.ui.info("Nothing relevant found.")
+            return
+        for line in block.splitlines()[2:]:  # skip the heading and the instruction line
+            state.ui.info(line)
+
+
 # ── Safety: permission modes and checkpoints ─────────────────────────────────
 
 class ModeCommand(Command):
@@ -390,7 +413,7 @@ def build_registry():
         MemoryCommand, ProjectsCommand, ProjectCommand, TitleCommand, DeleteCommand,
         StatusCommand, ModelCommand, VerboseCommand, ClearScreenCommand,
         PlanCommand, PlansCommand, PlanRejectCommand, DashboardCommand,
-        InitCommand, InstructionsCommand, ModeCommand, UndoCommand, CheckpointsCommand,
+        InitCommand, InstructionsCommand, ModeCommand, UndoCommand, CheckpointsCommand, RecallCommand,
     ]:
         registry.register(cmd_cls())
     global REGISTRY

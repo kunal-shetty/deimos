@@ -225,6 +225,9 @@ def main():
     state = AppState(ui=ui, llm=llm, tools=tools, system_prompt=system_prompt, agent=agent)
     if not agent.memory.enabled:
         ui.info(f"Long-term memory is off ({agent.memory.reason}). Run `deimos setup` to connect Supabase.")
+    elif not agent.memory.search_available:
+        ui.info("Memory search isn't set up, so all facts load up front. Run memory/migrations/001_search.sql "
+                "in Supabase to recall only what's relevant (see docs/installation.md).")
 
     # Enable slash-command completion and the status bar before the first prompt
     ui.setup_input(registry.names_with_descriptions())

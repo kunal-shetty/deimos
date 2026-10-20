@@ -36,4 +36,5 @@ packages = ["agent", "tools", "llm", "ui", "memory", "commands", "web", "auth", 
 
 [tool.setuptools.package-data]
 prompts = ["*.txt", "*.md"]
+memory = ["migrations/*.sql"]
 skills = ["**/*"]

@@ -158,6 +158,17 @@ CREATE TABLE archive_memories (
 );
 ```
 
+### Memory search
+
+Then run [`memory/migrations/001_search.sql`](../memory/migrations/001_search.sql) in the same SQL
+editor (it's safe to run again). It adds full-text search columns and a `search_memories` function,
+which lets Deimos recall only the memories relevant to each message: facts, project facts, earlier
+session summaries and things you said before, ranked by relevance, confidence or importance, and
+recency.
+
+Without it, Deimos still works but loads every stored fact into the prompt at the start of each
+session. **Upgrading an existing database:** run the migration once; nothing else changes.
+
 ## 5. Running Deimos
 
 Once installed and configured, you can start the agent:
