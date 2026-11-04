@@ -8,6 +8,7 @@ version = "0.2.0"
 description = "An autonomous coding agent for your terminal"
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
 dependencies = [
     "requests>=2.31.0",
     "python-dotenv>=1.0.0",
@@ -25,7 +26,9 @@ dependencies = [
 dev = ["pytest>=7.0.0", "pytest-asyncio>=0.20.0"]
 
 [project.urls]
-Homepage = "https://github.com/kunal-shetty/deimos"
+Homepage = "https://kunal-shetty.github.io/deimos/"
+Repository = "https://github.com/kunal-shetty/deimos"
+Changelog = "https://github.com/kunal-shetty/deimos/blob/main/CHANGELOG.md"
 
 [project.scripts]
 deimos = "main:main"
