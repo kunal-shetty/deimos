@@ -120,8 +120,8 @@ def test_file_checks(tmp_path):
 
 def test_command_check_reports_output(tmp_path):
     ctx = _ctx(tmp_path)
-    assert evaluate({"type": "command_passes", "command": "true"}, ctx).passed
-    bad = evaluate({"type": "command_passes", "command": "echo nope; exit 3"}, ctx)
+    assert evaluate({"type": "command_passes", "command": "exit 0"}, ctx).passed
+    bad = evaluate({"type": "command_passes", "command": "echo nope && exit 3"}, ctx)
     assert not bad.passed and "exited 3" in bad.detail and "nope" in bad.detail
 
 

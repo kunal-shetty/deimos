@@ -2,6 +2,12 @@ import pytest
 from unittest.mock import MagicMock, patch
 from llm.client import LLMClient
 
+
+@pytest.fixture(autouse=True)
+def api_key(monkeypatch):
+    """LLMClient reads the key at construction; tests must not need a real one."""
+    monkeypatch.setattr("llm.client.LLM_API_KEY", "test_key")
+
 def test_llm_client_complete_success():
     # Mock the LLMClient and the requests response
     with patch("llm.client.requests.post") as mock_post:
