@@ -9,7 +9,12 @@ real model; tasks without a script are live-only.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
+
+# The interpreter running the evals: `python3` does not exist on Windows, and
+# this one is guaranteed to have pytest. Quoted because the path may hold spaces.
+PYTHON = f'"{sys.executable}"'
 
 
 @dataclass
@@ -176,7 +181,7 @@ SCRIPTED: list[Task] = [
         ],
         checks=[
             {"type": "file_contains", "path": "calc.py", "text": "return a + b"},
-            {"type": "command_passes", "command": "python3 -m pytest -q"},
+            {"type": "command_passes", "command": f"{PYTHON} -m pytest -q"},
             {"type": "tool_called", "name": "run_command", "min": 2},
             {"type": "tool_result_contains", "name": "run_command", "text": "[exit 1]"},
             {"type": "max_llm_calls", "n": 4},
@@ -219,7 +224,7 @@ SCRIPTED: list[Task] = [
         prompt="Print a lot of text.",
         permission_mode="auto",
         script=[
-            {"tool_calls": [{"name": "run_command", "inputs": {"command": "python3 -c \"print('x' * 20000)\""}}]},
+            {"tool_calls": [{"name": "run_command", "inputs": {"command": f"{PYTHON} -c \"print('x' * 20000)\""}}]},
             {"text": "Printed."},
         ],
         checks=[
@@ -242,7 +247,7 @@ LIVE_ONLY: list[Task] = [
         checks=[
             {"type": "file_exists", "path": "fizzbuzz.py"},
             {"type": "file_exists", "path": "tests/test_fizzbuzz.py"},
-            {"type": "command_passes", "command": "python3 -m pytest -q"},
+            {"type": "command_passes", "command": f"{PYTHON} -m pytest -q"},
             {"type": "max_tool_calls", "n": 15},
         ],
     ),
@@ -257,7 +262,7 @@ LIVE_ONLY: list[Task] = [
         },
         permission_mode="auto",
         checks=[
-            {"type": "command_passes", "command": "python3 -m pytest -q"},
+            {"type": "command_passes", "command": f"{PYTHON} -m pytest -q"},
             {"type": "file_unchanged", "path": "tests/test_stats.py"},
             {"type": "max_tool_calls", "n": 12},
         ],
@@ -277,7 +282,7 @@ LIVE_ONLY: list[Task] = [
             {"type": "file_not_contains", "path": "billing.py", "text": "compute_total"},
             {"type": "file_not_contains", "path": "app.py", "text": "compute_total"},
             {"type": "file_contains", "path": "tests/test_billing.py", "text": "calculate_total"},
-            {"type": "command_passes", "command": "python3 -m pytest -q"},
+            {"type": "command_passes", "command": f"{PYTHON} -m pytest -q"},
         ],
     ),
     Task(

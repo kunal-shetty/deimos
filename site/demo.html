@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deimos Demo</title>
+  <meta name="description" content="An 80 second walkthrough of Deimos, an open-source coding agent for your terminal. Pause it, scrub it and copy text from it.">
+  <meta property="og:title" content="Deimos Demo">
+  <meta property="og:description" content="An 80 second walkthrough of an open-source coding agent for your terminal.">
+  <meta property="og:image" content="https://kunal-shetty.github.io/deimos/social-preview.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.17.0/dist/bundle/asciinema-player.css">
+  <style>
+    :root { --bg: #080a12; --panel: #161a26; --text: #eef1f6; --muted: #9aa3b2; --accent: #5fd7ff; --green: #87d787; }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) { --bg: #f5f7fa; --panel: #ffffff; --text: #141822; --muted: #566072; --accent: #0b6e99; --green: #2d7a3e; }
+    }
+    :root[data-theme="light"] { --bg: #f5f7fa; --panel: #ffffff; --text: #141822; --muted: #566072; --accent: #0b6e99; --green: #2d7a3e; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 960px; margin: 0 auto; padding: 40px 16px 56px; }
+    h1 { margin: 0 0 6px; font: 700 34px/1.2 ui-monospace, Consolas, monospace; color: var(--accent); letter-spacing: .04em; }
+    .lead { margin: 0 0 24px; color: var(--muted); }
+    #player { border-radius: 8px; overflow: hidden; }
+    #caption { min-height: 64px; margin: 0; padding: 14px 18px; background: var(--panel); border-left: 3px solid var(--accent); font-size: 18px; }
+    .note { margin: 16px 0 32px; color: var(--muted); font-size: 14px; }
+    h2 { margin: 0 0 8px; font-size: 18px; }
+    pre { margin: 0 0 10px; padding: 12px 14px; background: var(--panel); border-radius: 6px; overflow-x: auto; font-size: 13px; }
+    a { color: var(--accent); }
+    .links { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 8px 22px; }
+    noscript img { max-width: 100%; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>DEIMOS</h1>
+    <p class="lead">An open-source coding agent for your terminal. Press play, pause anywhere, and select text in the recording.</p>
+    <div id="player"></div>
+    <p id="caption" aria-live="polite">Press play to start the 80 second walkthrough.</p>
+    <noscript><img src="demo.gif" alt="Recording of a Deimos session"></noscript>
+    <p class="note">This is a recording of the real installed program, not a sandbox you can type in. Tools, permission prompts, checkpoints and pytest all ran for real. Model replies and model decisions were scripted so that the recording is repeatable, which is why the welcome box says <code>model: scripted-demo</code>. Install wait is sped up and idle pauses are shortened.</p>
+    <h2>Try it yourself</h2>
+    <pre>curl -fsSL https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.sh | sh</pre>
+    <pre>irm https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.ps1 | iex</pre>
+    <div class="links">
+      <a href="https://github.com/kunal-shetty/deimos">Source on GitHub</a>
+      <a href="./">Project site</a>
+    </div>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/asciinema-player@3.17.0/dist/bundle/asciinema-player.min.js"></script>
+  <script>
+    (function () {
+      var el = document.getElementById('caption');
+      if (!window.AsciinemaPlayer) {
+        el.textContent = 'The player could not load. Showing the GIF instead.';
+        document.getElementById('player').innerHTML = '<img src="demo.gif" alt="Recording of a Deimos session" style="max-width:100%">';
+        return;
+      }
+      var player = AsciinemaPlayer.create('demo.cast', document.getElementById('player'), {
+        fit: 'width', theme: 'monokai', preload: true, idleTimeLimit: 3, poster: 'npt:0:12'
+      });
+      fetch('demo.captions.json').then(function (r) { return r.json(); }).then(function (caps) {
+        setInterval(function () {
+          Promise.resolve(player.getCurrentTime()).then(function (t) {
+            var cur = null;
+            caps.forEach(function (c) { if (c[0] <= t + 0.05) cur = c[1]; });
+            if (cur && el.textContent !== cur) el.textContent = cur;
+          });
+        }, 250);
+      }).catch(function () {});
+    })();
+  </script>
+</body>
+</html>

@@ -39,6 +39,11 @@ done
 [ -n "$PYTHON" ] || fail "Python 3.11 or newer is required. Install it from https://www.python.org/downloads/ and run this again."
 say "Using $("$PYTHON" -c 'import sys; print(f"Python {sys.version.split()[0]} at {sys.executable}")')"
 
+# pip only accepts URLs after "deimos @", so turn a local path into a file:// URL
+if [ -e "$SOURCE" ]; then
+    SOURCE="$("$PYTHON" -c 'import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve().as_uri())' "$SOURCE")"
+fi
+
 # ── 2. Private virtual environment ───────────────────────────────────────────
 mkdir -p "$DEIMOS_HOME"
 if [ ! -d "$VENV" ]; then
