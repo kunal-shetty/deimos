@@ -1,0 +1,66 @@
+[
+[
+0.018915820504421896,
+"One command installs Deimos in its own environment. (Install wait sped up.)"
+],
+[
+6.7410000000000005,
+"Run deimos in any project. It starts in ask mode: nothing changes without your OK."
+],
+[
+12.256,
+"Describe the problem in plain English."
+],
+[
+15.236,
+"It reproduces first. Every command needs your approval."
+],
+[
+19.831,
+"Real pytest output comes back to the agent, and it reads the code."
+],
+[
+23.987,
+"Every edit shows a diff before it lands."
+],
+[
+26.348000000000003,
+"It claimed it was done, but its fix was wrong. Deimos ran the tests anyway."
+],
+[
+30.585000000000004,
+"The failure goes back to the agent, so it has to try again."
+],
+[
+33.03900000000001,
+"Tests pass, so the turn can finish."
+],
+[
+37.928000000000004,
+"Bigger jobs start with a plan you can read before anything runs."
+],
+[
+43.23500000000001,
+"Approve the plan and it works through the steps."
+],
+[
+51.010000000000005,
+"New code is verified the same way."
+],
+[
+55.80200000000001,
+"Changed your mind? Every turn is checkpointed, and /undo restores the files."
+],
+[
+58.705000000000005,
+"A destructive command stops at a red warning."
+],
+[
+63.644000000000005,
+"Say no, and it stops. Your files are untouched."
+],
+[
+67.95434862385322,
+"Agent behaviour is tested too: 12 scripted evals, no API key needed."
+]
+]

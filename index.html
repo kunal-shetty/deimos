@@ -6,6 +6,9 @@
   <title>DEIMOS — Autonomous Coding Intelligence</title>
   <meta name="description" content="An autonomous coding agent for your terminal — powered by Groq, with persistent multi-layer memory and structured workflow planning.">
   <meta name="theme-color" content="#03030a">
+  <meta property="og:image" content="https://kunal-shetty.github.io/deimos/social-preview.png">
+  <meta property="og:url" content="https://kunal-shetty.github.io/deimos/">
+  <meta name="twitter:card" content="summary_large_image">
   <meta property="og:title" content="DEIMOS — Autonomous Coding Intelligence">
   <meta property="og:description" content="Terminal-native coding agent. Plans, executes, remembers.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23B01828'/></svg>">
@@ -941,13 +944,14 @@
       <div class="hero-inner">
         <a class="hero-badge" href="#internals">
           <span class="b-dot"></span>
-          <span>SYSTEM ACTIVE — LLAMA-3.3-70B ON GROQ</span>
+          <span>OPEN SOURCE — MIT LICENSED</span>
           <span class="b-arr">→</span>
         </a>
         <h1 class="hero-title">MEET <span class="t-grad">DEIMOS</span></h1>
         <p class="hero-sub">Autonomous coding intelligence for your terminal. It <strong>plans</strong> before it writes, <strong>executes</strong> with precision, and <strong>remembers</strong> everything between sessions.</p>
         <div class="hero-ctas">
           <a class="btn-red" href="#install">⌘ Quick Install</a>
+          <a class="btn-outline" href="demo.html">Watch the Demo ↗</a>
           <a class="btn-outline" href="https://github.com/kunal-shetty/deimos/blob/main/docs/architecture.md" target="_blank" rel="noopener">Read Architecture ↗</a>
         </div>
         <div class="hero-meta">
@@ -1019,11 +1023,11 @@
             </div>
             <div class="meta-item">
               <div class="meta-key">BACKBONE LLM</div>
-              <div class="meta-val">GROQ<br>LLAMA-3.3-70B</div>
+              <div class="meta-val">GROQ<br>GPT-OSS-120B</div>
             </div>
             <div class="meta-item">
               <div class="meta-key">MEMORY STORE</div>
-              <div class="meta-val">SUPABASE<br>PGVECTOR</div>
+              <div class="meta-val">SUPABASE<br>FULL-TEXT RECALL</div>
             </div>
             <div class="meta-item">
               <div class="meta-key">INTERFACE</div>
@@ -1058,7 +1062,7 @@
               </span>
             </div>
             <div class="bento-name">Multi-Layer Memory</div>
-            <div class="bento-desc">Persistent knowledge via Supabase + pgvector. Deimos recalls codebase structure, patterns, and past decisions — and carries them forward without being told.</div>
+            <div class="bento-desc">Persistent knowledge via Supabase and Postgres full-text search. Deimos recalls codebase structure, patterns, and past decisions — and carries them forward without being told.</div>
             <div class="bento-mem-layers">
               <span class="bento-mem-layer">SEMANTIC</span>
               <span class="bento-mem-layer">EPISODIC</span>
@@ -1172,12 +1176,12 @@
             <div class="arch-box">
               <div class="a-lbl">INFERENCE</div>
               <div class="a-name">Groq API</div>
-              <div class="a-items">llama-3.3-70b<br>Low-latency calls</div>
+              <div class="a-items">gpt-oss-120b<br>Low-latency calls</div>
             </div>
             <div class="arch-box">
               <div class="a-lbl">PERSISTENCE</div>
               <div class="a-name">Supabase</div>
-              <div class="a-items">PostgreSQL<br>pgvector embeddings</div>
+              <div class="a-items">PostgreSQL<br>Full-text recall</div>
             </div>
             <div class="arch-box">
               <div class="a-lbl">INTERFACE</div>
@@ -1289,24 +1293,20 @@
           <div class="term-body2">
             <div class="tc active" id="tc-unix">
               <div class="tl"><span class="tc2"># Quick install — Unix / Bash / WSL</span></div>
-              <div class="tl"><span class="tp">$</span><span>curl -sSL https://deimos.sh/install | sh</span></div>
+              <div class="tl"><span class="tp">$</span><span>curl -fsSL https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.sh | sh</span></div>
               <div class="tl" style="margin-top:10px"><span class="tc2"># Launch the agent</span></div>
               <div class="tl"><span class="tp">$</span><span>deimos assemble</span></div>
               <div class="tl"><span class="tc2"># Or monitor it live</span></div>
               <div class="tl"><span class="tp">$</span><span>deimos dashboard</span></div>
-              <button class="copy-btn" type="button" data-copy="curl -sSL https://deimos.sh/install | sh">COPY INSTALL COMMAND</button>
+              <button class="copy-btn" type="button" data-copy="curl -fsSL https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.sh | sh">COPY INSTALL COMMAND</button>
             </div>
             <div class="tc" id="tc-win">
-              <div class="tl"><span class="tc2"># Manual install — Windows / PowerShell</span></div>
-              <div class="tl"><span class="tp">&gt;</span><span>git clone https://github.com/kunal-shetty/deimos</span></div>
-              <div class="tl"><span class="tp">&gt;</span><span>cd deimos</span></div>
-              <div class="tl"><span class="tp">&gt;</span><span>python -m venv .venv</span></div>
-              <div class="tl"><span class="tp">&gt;</span><span>.\.venv\Scripts\activate</span></div>
-              <div class="tl"><span class="tp">&gt;</span><span>pip install .</span></div>
-              <button class="copy-btn" type="button" data-copy="git clone https://github.com/kunal-shetty/deimos&#10;cd deimos&#10;python -m venv .venv&#10;.venv\Scripts\activate&#10;pip install .">COPY COMMANDS</button>
+              <div class="tl"><span class="tc2"># Windows / PowerShell</span></div>
+              <div class="tl"><span class="tp">&gt;</span><span>irm https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.ps1 | iex</span></div>
+              <button class="copy-btn" type="button" data-copy="irm https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.ps1 | iex">COPY COMMANDS</button>
             </div>
             <div class="tc" id="tc-cfg">
-              <div class="tl"><span class="tc2"># Create .env in the project root</span></div>
+              <div class="tl"><span class="tc2"># Or run: deimos setup (saves to ~/.deimos/.env)</span></div>
               <div class="tl"><span class="tk">GROQ_API_KEY</span><span>=</span><span class="tv">your_groq_api_key</span></div>
               <div class="tl"><span class="tk">TAVILY_API_KEY</span><span>=</span><span class="tv">your_tavily_api_key</span></div>
               <div class="tl"><span class="tk">SUPABASE_URL</span><span>=</span><span class="tv">https://your-project.supabase.co</span></div>
@@ -1361,7 +1361,7 @@
         <div class="faq-list reveal" style="--rd:0.15s">
           <div class="faq-item">
             <button class="faq-q" type="button">What makes Deimos different from other coding agents?<span class="faq-ico">+</span></button>
-            <div class="faq-a"><div class="faq-a-inner">Deimos is <strong>plan-first</strong>: it builds a dependency-aware task DAG before touching code, and it <strong>remembers between sessions</strong> via layered pgvector memory. Most agents re-learn your codebase every run — Deimos doesn't.</div></div>
+            <div class="faq-a"><div class="faq-a-inner">Deimos is <strong>plan-first</strong>: it builds a dependency-aware task DAG before touching code, and it <strong>remembers between sessions</strong> through optional layered memory on Supabase.</div></div>
           </div>
           <div class="faq-item">
             <button class="faq-q" type="button">Does it need an internet connection?<span class="faq-ico">+</span></button>
@@ -1377,7 +1377,7 @@
           </div>
           <div class="faq-item">
             <button class="faq-q" type="button">What does it cost to run?<span class="faq-ico">+</span></button>
-            <div class="faq-a"><div class="faq-a-inner">Groq offers a generous free tier for <code>llama-3.3-70b</code>, and Supabase's free tier easily covers personal use. Typical sessions cost $0.</div></div>
+            <div class="faq-a"><div class="faq-a-inner">Deimos itself is free and MIT licensed. You pay only for the model calls you make with your own Groq key, and Supabase memory is optional.</div></div>
           </div>
         </div>
       </div>

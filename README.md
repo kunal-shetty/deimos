@@ -1,13 +1,47 @@
-```
-██████╗ ███████╗██╗███╗   ███╗ ██████╗ ███████╗
-██╔══██╗██╔════╝██║████╗ ████║██╔═══██╗██╔════╝
-██║  ██║█████╗  ██║██╔████╔██║██║   ██║███████╗
-██║  ██║██╔══╝  ██║██║╚██╔╝██║██║   ██║╚════██║
-██████╔╝███████╗██║██║ ╚═╝ ██║╚██████╔╝███████║
-╚═════╝ ╚══════╝╚═╝╚═╝     ╚═╝ ╚═════╝ ╚══════╝
+<h1 align="center">DEIMOS</h1>
+
+<p align="center"><strong>An open-source coding agent for your terminal that runs your tests before it calls the job done.</strong></p>
+
+<p align="center">
+  <a href="https://github.com/kunal-shetty/deimos/actions/workflows/ci.yml"><img src="https://github.com/kunal-shetty/deimos/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/kunal-shetty/deimos/releases/latest"><img src="https://img.shields.io/github/v/release/kunal-shetty/deimos" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+</p>
+
+<p align="center">
+  <a href="https://kunal-shetty.github.io/deimos/demo.html"><img src="site/demo.gif" alt="80 second recording: Deimos installs in one command, fixes a bug, has a wrong fix caught by the tests, plans a feature, undoes it and stops at a destructive command" width="820"></a>
+</p>
+
+<p align="center">
+  <a href="https://kunal-shetty.github.io/deimos/demo.html"><strong>Open the live demo</strong></a> to pause, scrub and copy text from the recording.<br>
+  <sub>Recorded from the real installed program: tools, prompts, checkpoints and pytest ran for real. Model replies and model decisions were scripted so the recording is repeatable.</sub>
+</p>
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.sh | sh
 ```
 
-> **An autonomous coding agent for your terminal — powered by Groq, with persistent multi-layer memory and structured workflow planning.**
+On Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.ps1 | iex
+```
+
+You need Python 3.11 or newer and a [Groq API key](https://console.groq.com/keys). Then run `deimos`
+in any project folder.
+
+## Why Deimos
+
+- **It checks its own work.** After editing, Deimos runs your test command and sends failures back
+  to the agent, so "done" is not just the model's opinion.
+- **You stay in control.** By default every edit shows a diff, every command asks first, and destructive
+  commands get a red warning. Move up to `auto-edit` or `auto` when you trust the task.
+- **Mistakes are cheap.** Each turn is checkpointed, and `/undo` restores the files.
+- **Bigger jobs start with a plan.** You read the steps before anything runs.
+- **Behaviour is tested.** `python -m evals run` drives the real agent loop through 12 scripted
+  tasks with no API key.
 
 ---
 
@@ -15,24 +49,10 @@
 
 Deimos is a terminal-based AI agent that thinks, plans, and executes code changes in your workspace.
 
-### 1. Install
-
-You need Python 3.11 or newer. Then run one line:
-
-**macOS, Linux, WSL**
-```bash
-curl -fsSL https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.sh | sh
-```
-
-**Windows (PowerShell)**
-```powershell
-irm https://raw.githubusercontent.com/kunal-shetty/deimos/main/scripts/install.ps1 | iex
-```
-
 The installer puts Deimos in its own environment under `~/.deimos` and adds a `deimos` command
 to your PATH. Open a new terminal afterwards, then run `deimos` in any project folder.
 
-### 2. Add your keys
+### 1. Add your keys
 
 The first run asks for your [Groq API key](https://console.groq.com/keys) and saves it to
 `~/.deimos/.env`. Run `deimos setup` any time to add or change keys:
@@ -44,13 +64,15 @@ The first run asks for your [Groq API key](https://console.groq.com/keys) and sa
 | `TYPESAFE_API_KEY` | Jev structured decisions; falls back to Groq without it (optional) |
 | `SUPABASE_URL`, `SUPABASE_KEY`, `DEIMOS_USER_ID` | Long-term memory across sessions (optional) |
 
-### 3. Long-term memory (optional)
+### 2. Long-term memory (optional)
 
 Without Supabase, Deimos works normally but forgets everything when a session ends. To keep
 memory between sessions, create a Supabase project, run the setup SQL from the
 [Installation Guide](docs/installation.md), and add its details with `deimos setup`.
 
 ### Developing Deimos
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 ```bash
 git clone https://github.com/kunal-shetty/deimos && cd deimos
 python -m pip install -e ".[dev]"
@@ -125,3 +147,7 @@ deimos/
 - **Database**: Supabase (PostgreSQL)
 - **UI**: prompt_toolkit (Terminal) & FastAPI (Web)
 - **Search**: Tavily API
+
+## License
+
+[MIT](LICENSE)
