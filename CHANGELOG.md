@@ -35,5 +35,6 @@ First tagged release.
 ### Fixed
 
 - Startup crash, context trimming, self-healing retries and plan tracking
+- `DEIMOS_SOURCE` now accepts a local path, as documented, in both installers
 - The website's install button pointed at a domain this project does not control; it
   now uses the official installer on GitHub

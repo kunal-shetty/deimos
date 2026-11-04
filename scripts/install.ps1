@@ -17,6 +17,8 @@ $ErrorActionPreference = 'Stop'
 $Repo       = 'kunal-shetty/deimos'
 $Ref        = if ($env:DEIMOS_REF) { $env:DEIMOS_REF } else { 'main' }
 $Source     = if ($env:DEIMOS_SOURCE) { $env:DEIMOS_SOURCE } else { "https://github.com/$Repo/archive/refs/heads/$Ref.zip" }
+# pip only accepts URLs after "deimos @", so turn a local path into a file:// URL
+if (Test-Path -LiteralPath $Source) { $Source = ([Uri](Resolve-Path -LiteralPath $Source).ProviderPath).AbsoluteUri }
 $DeimosHome = if ($env:DEIMOS_HOME) { $env:DEIMOS_HOME } else { Join-Path $env:USERPROFILE '.deimos' }
 $Venv       = Join-Path $DeimosHome 'venv'
 $BinDir     = Join-Path $DeimosHome 'bin'

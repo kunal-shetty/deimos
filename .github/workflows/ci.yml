@@ -17,8 +17,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -35,8 +35,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install from this checkout
@@ -45,3 +45,20 @@ jobs:
           DEIMOS_NO_MODIFY_PATH: "1"
         run: sh scripts/install.sh
       - run: ~/.local/bin/deimos --version
+
+  install-windows:
+    name: Installer on windows-latest
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install from this checkout
+        shell: pwsh
+        env:
+          DEIMOS_SOURCE: ${{ github.workspace }}
+          DEIMOS_NO_MODIFY_PATH: "1"
+        run: ./scripts/install.ps1
+      - shell: pwsh
+        run: ~/.deimos/venv/Scripts/deimos.exe --version
