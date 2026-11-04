@@ -1,0 +1,40 @@
+name: Bug report
+description: Something in Deimos did not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run deimos in a project with ...
+        2. Ask it to ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Deimos version
+      description: Output of `deimos --version`
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS, Python version and model
+      placeholder: Windows 11, Python 3.13, openai/gpt-oss-120b
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or traceback
+      description: Remove API keys and anything private before pasting.
+      render: text
